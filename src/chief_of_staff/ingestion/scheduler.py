@@ -16,12 +16,14 @@ async def _sync_loop():
     """Runs forever, syncing all sources on an interval."""
     # Wait before first sync to let the server start up
     await asyncio.sleep(60)
-    await run_sync()
 
     while True:
+        try:
+            logger.info("=== Scheduled sync starting ===")
+            await run_sync()
+        except Exception as e:
+            logger.error(f"Sync loop iteration failed: {e}", exc_info=True)
         await asyncio.sleep(SYNC_INTERVAL_SECONDS)
-        logger.info("=== Scheduled sync starting ===")
-        await run_sync()
 
 
 async def run_sync():

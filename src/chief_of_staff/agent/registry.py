@@ -31,6 +31,7 @@ class AgentConfig:
     standing_instructions: list[str] = field(default_factory=list)
     triage_prompt: str = ""
     trigger_words: list[str] = field(default_factory=list)
+    request_timeout: int = 120
 
     @classmethod
     def from_yaml(cls, path: Path) -> AgentConfig:
@@ -50,6 +51,7 @@ class AgentConfig:
             standing_instructions=data.get("standing_instructions", []),
             triage_prompt=data.get("triage_prompt", ""),
             trigger_words=data.get("trigger_words", []),
+            request_timeout=data.get("request_timeout", 120),
         )
 
     def to_yaml(self, path: Path) -> None:
@@ -67,6 +69,7 @@ class AgentConfig:
             "standing_instructions": self.standing_instructions,
             "triage_prompt": self.triage_prompt,
             "trigger_words": self.trigger_words,
+            "request_timeout": self.request_timeout,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:

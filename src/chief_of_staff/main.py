@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,10 +18,35 @@ from chief_of_staff.webhooks.zoom import router as zoom_router
 from chief_of_staff.webhooks.recall import router as recall_router
 from chief_of_staff.dashboard.routes import router as dashboard_router
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
+
+# --- Structured logging ---
+class JSONFormatter(logging.Formatter):
+    """JSON log formatter for structured output on Railway."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0]:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_entry)
+
+
+log_format = os.environ.get("LOG_FORMAT", "text")
+if log_format == "json":
+    handler = logging.StreamHandler()
+    handler.setFormatter(JSONFormatter())
+    logging.root.handlers = [handler]
+    logging.root.setLevel(logging.INFO)
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +61,6 @@ async def lifespan(app: FastAPI):
     # Fix SSL certs on macOS (not needed on Linux/Railway)
     try:
         import certifi
-        import os
         os.environ.setdefault("SSL_CERT_FILE", certifi.where())
     except ImportError:
         pass
@@ -74,7 +100,47 @@ app.include_router(dashboard_router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "agent": "chief_of_staff"}
+    """Enhanced health check — checks all subsystems."""
+    checks = {}
+
+    # SQLite
+    try:
+        import sqlite3
+        conn = sqlite3.connect(settings.sqlite_db_path)
+        conn.execute("SELECT 1")
+        conn.close()
+        checks["sqlite"] = "ok"
+    except Exception as e:
+        checks["sqlite"] = f"error: {e}"
+
+    # ChromaDB
+    try:
+        from chief_of_staff.knowledge.vectordb import get_collection
+        collection = get_collection()
+        count = collection.count()
+        checks["chromadb"] = f"ok ({count} chunks)"
+    except Exception as e:
+        checks["chromadb"] = f"error: {e}"
+
+    # Discord
+    try:
+        from chief_of_staff.communication.discord_bot import get_discord_bot
+        bot = get_discord_bot()
+        if bot.is_ready():
+            checks["discord"] = f"ok ({len(bot.guilds)} guilds)"
+        else:
+            checks["discord"] = "connecting"
+    except Exception as e:
+        checks["discord"] = f"error: {e}"
+
+    # Anthropic key
+    checks["anthropic_key"] = "ok" if settings.anthropic_api_key else "missing"
+
+    # Overall status
+    has_errors = any("error" in str(v) or v == "missing" for v in checks.values())
+    status = "degraded" if has_errors else "ok"
+
+    return {"status": status, **checks}
 
 
 @app.post("/api/ask")

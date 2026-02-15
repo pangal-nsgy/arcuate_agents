@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from chief_of_staff.knowledge import database as db
 from chief_of_staff.knowledge import vectordb
 from chief_of_staff.knowledge.embeddings import content_hash
+
+logger = logging.getLogger(__name__)
 
 
 def ingest(
@@ -57,8 +60,13 @@ def get_context_for_query(query: str, max_tokens: int = 8000) -> str:
     """Retrieve relevant context for a query, formatted for the LLM.
 
     Returns a string of concatenated relevant documents, trimmed to max_tokens.
+    Returns empty string if ChromaDB is unavailable (graceful degradation).
     """
-    results = search(query, n_results=15)
+    try:
+        results = search(query, n_results=15)
+    except Exception as e:
+        logger.warning(f"ChromaDB search failed, continuing without context: {e}")
+        return ""
 
     context_parts = []
     total_chars = 0

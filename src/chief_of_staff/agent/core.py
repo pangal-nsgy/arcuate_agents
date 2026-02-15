@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -14,7 +15,7 @@ from chief_of_staff.agent.activity import (
 )
 from chief_of_staff.agent.registry import AgentConfig, get_registry
 from chief_of_staff.agent.tools import get_tool_definitions, get_server_tools, execute_tool
-from chief_of_staff.knowledge.store import get_context_for_query
+from chief_of_staff.agent.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,10 @@ class Agent:
 
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self.client = anthropic.AsyncAnthropic(
+            api_key=settings.anthropic_api_key,
+            timeout=60.0,
+        )
 
     def reload_config(self) -> None:
         """Re-read config from disk (picks up self-modifications)."""
@@ -43,8 +47,34 @@ class Agent:
     ) -> str:
         """Process a message and return the agent's response.
 
-        Loads fresh config each time, handles multi-turn tool use, logs all activity.
+        Wraps _respond_inner with an overall request timeout.
         """
+        timeout = self.config.request_timeout
+        try:
+            return await asyncio.wait_for(
+                self._respond_inner(user_message, conversation_history, channel, user_id, session_id),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            log_activity(
+                agent_name=self.config.name,
+                action_type=ERROR,
+                action_detail=f"Request timed out after {timeout}s",
+                channel=channel,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            return "I took too long on that one. Try breaking the request into smaller parts."
+
+    async def _respond_inner(
+        self,
+        user_message: str,
+        conversation_history: list[dict[str, Any]] | None = None,
+        channel: str = "",
+        user_id: str = "",
+        session_id: str = "",
+    ) -> str:
+        """Core agent loop — handles multi-turn tool use, logs all activity."""
         self.reload_config()
 
         messages = list(conversation_history or [])
@@ -52,10 +82,14 @@ class Agent:
         # Build system prompt from config (includes standing instructions + memory)
         system_prompt = self.config.build_system_prompt()
 
-        # Retrieve relevant context from knowledge base
-        context = get_context_for_query(user_message)
-        if context:
-            system_prompt += f"\n\n--- RELEVANT CONTEXT FROM KNOWLEDGE BASE ---\n{context}\n--- END CONTEXT ---"
+        # Retrieve relevant context from knowledge base (graceful degradation)
+        try:
+            from chief_of_staff.knowledge.store import get_context_for_query
+            context = get_context_for_query(user_message)
+            if context:
+                system_prompt += f"\n\n--- RELEVANT CONTEXT FROM KNOWLEDGE BASE ---\n{context}\n--- END CONTEXT ---"
+        except Exception as e:
+            logger.warning(f"Knowledge base unavailable, continuing without context: {e}")
 
         if user_id:
             system_prompt += f"\n\nUser identifier: {user_id}"
@@ -70,7 +104,8 @@ class Agent:
         start_time = time.time()
         for iteration in range(self.config.max_iterations):
             try:
-                response = self.client.messages.create(
+                response = await retry_async(
+                    self.client.messages.create,
                     model=self.config.model,
                     max_tokens=self.config.max_tokens,
                     system=system_prompt,
@@ -105,11 +140,20 @@ class Agent:
                 tool_start = time.time()
                 logger.info(f"[{self.config.name}] Tool: {tool_call.name}({tool_call.input})")
 
-                result = await execute_tool(
-                    tool_call.name,
-                    tool_call.input,
-                    agent_name=self.config.name,
-                )
+                # Per-tool timeout (30s)
+                try:
+                    result = await asyncio.wait_for(
+                        execute_tool(
+                            tool_call.name,
+                            tool_call.input,
+                            agent_name=self.config.name,
+                        ),
+                        timeout=30,
+                    )
+                except asyncio.TimeoutError:
+                    result = f"Tool '{tool_call.name}' timed out after 30s."
+                    logger.warning(result)
+
                 tool_duration = int((time.time() - tool_start) * 1000)
 
                 log_activity(

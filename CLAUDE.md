@@ -24,17 +24,19 @@ agent_memory/            # Persistent memory per agent
   chief_of_staff.md      # Learnings, preferences, facts
 src/chief_of_staff/
   agent/
-    core.py              # Agent loop (config-driven, activity-tracked)
-    tools.py             # 17 tools including self-mod, memory, delegation, code ops
+    core.py              # Agent loop (async, config-driven, timeouts, activity-tracked)
+    tools.py             # 17 tools including self-mod, memory, delegation, code ops (error-wrapped)
+    retry.py             # Retry with exponential backoff for transient API failures
     activity.py          # Activity logging to SQLite (22 action types)
     code_ops.py          # Code self-modification via GitHub REST API
-    memory.py            # Persistent memory read/write/search
+    memory.py            # Persistent memory read/write/search (async-safe)
     registry.py          # Agent config loading from YAML
     planner.py           # Multi-step task planner
   dashboard/
     routes.py            # Dashboard API + HTML frontend (single-page app)
-  communication/         # Discord, SMS, email
+  communication/         # Discord, SMS, email, error reporting
     discord_bot.py       # Discord interface (primary), triage + response
+    error_reporter.py    # Posts errors to #bot-errors Discord channel
     sms.py               # Twilio WhatsApp/SMS
     email.py             # Gmail API send (authenticated as agent1@arcuatehealth.com)
     _google_auth.py      # Google OAuth helper (file + env var modes)
@@ -44,12 +46,18 @@ src/chief_of_staff/
     elevenlabs.py        # ElevenLabs transcript ingestion
     zoom.py              # Zoom cloud recording ingestion
     recall_bot.py        # Recall.ai meeting bot
-    scheduler.py         # Background sync (every 5 min)
+    scheduler.py         # Background sync (every 5 min, crash-protected)
   knowledge/             # ChromaDB + SQLite
-    store.py             # Unified knowledge interface
+    store.py             # Unified knowledge interface (graceful degradation)
     vectordb.py          # ChromaDB semantic search
     database.py          # SQLite structured metadata
   webhooks/              # Twilio, Gmail push, Zoom, Recall.ai
+tests/                   # Test suite (16 tests)
+  conftest.py            # Shared fixtures (mock configs, mock Anthropic responses)
+  test_core.py           # Agent loop: text response, timeout, iteration limit
+  test_tools.py          # Tool dispatch: known tool, unknown tool, error wrapping
+  test_retry.py          # Retry: 429 handling, max retries, backoff, non-retryable errors
+  test_error_handling.py # Tool failures return strings, not exceptions
 ```
 
 ### Tools (17 total)
@@ -179,7 +187,7 @@ Calls to **+16282127401** follow a separate pipeline:
 - Project ID: dac8716b-a213-4da5-a6c8-55c2bef98e96
 - GitHub repo connected: pangal-nsgy/arcuate_agents
 - Branch: claude/mcp-chrome-extension-BW3zj (auto-deploys on push)
-- Env vars configured: ANTHROPIC_API_KEY, TWILIO_*, ELEVENLABS_API_KEY, DISCORD_BOT_TOKEN, CHIEF_EMAIL, FOUNDER_PHONE_NUMBERS, MESSAGING_CHANNEL, CHROMA_PERSIST_DIR, SQLITE_DB_PATH, PORT, GOOGLE_TOKEN_JSON, GITHUB_TOKEN
+- Env vars configured: ANTHROPIC_API_KEY, TWILIO_*, ELEVENLABS_API_KEY, DISCORD_BOT_TOKEN, CHIEF_EMAIL, FOUNDER_PHONE_NUMBERS, MESSAGING_CHANNEL, CHROMA_PERSIST_DIR, SQLITE_DB_PATH, PORT, GOOGLE_TOKEN_JSON, GITHUB_TOKEN, LOG_FORMAT=json
 
 ### Dockerfile Notes
 - Uses `python:3.12-slim`
@@ -195,11 +203,10 @@ PYTHONPATH=src python -m uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8
 ```
 
 ## Next Steps (priority order)
-1. **FIX: Switch Anthropic client to async** — `core.py` uses sync `Anthropic()` client inside async Discord loop, causing SSL deadlocks on Railway. Change to `AsyncAnthropic` + `await client.messages.create()`. This is blocking all Discord functionality.
-2. **Create first sub-agents** — lead_scorer, research_agent, etc. via Discord (agent creates YAML + deploys via code ops)
-3. **Add real-time 628 call tracking** — add Twilio voice status callbacks so calls appear instantly on dashboard
-4. **Set up Zoom integration** — configure Zoom credentials when ready, webhook code is already built
-5. **Consider removing `send_meeting_bot`** from default tools since Recall.ai isn't configured (low priority, code handles gracefully)
+1. **Create first sub-agents** — lead_scorer, research_agent, etc. via Discord (agent creates YAML + deploys via code ops)
+2. **Add real-time 628 call tracking** — add Twilio voice status callbacks so calls appear instantly on dashboard
+3. **Set up Zoom integration** — configure Zoom credentials when ready, webhook code is already built
+4. **Consider removing `send_meeting_bot`** from default tools since Recall.ai isn't configured (low priority, code handles gracefully)
 
 ## Key Decisions Made
 - Discord over SMS/WhatsApp — Twilio SMS wasn't delivering to Dhiraj's phone
@@ -213,9 +220,45 @@ PYTHONPATH=src python -m uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8
 - ChromaDB for vector search — local, no external service needed
 - Comprehensive tracking — all 9 files that handle communication/ingestion/webhooks now log to activity table
 
+## Production Hardening (implemented 2026-02-15)
+
+### Async Client
+- `core.py` and `discord_bot.py` use `anthropic.AsyncAnthropic` — no sync blocking in the event loop
+- Triage calls in Discord are now direct `await` (no `run_in_executor`)
+
+### Timeouts
+- **Overall request**: 120s (configurable via `request_timeout` in agent YAML)
+- **Per-API-call**: 60s (set in `AsyncAnthropic(timeout=60.0)`)
+- **Per-tool**: 30s (enforced via `asyncio.wait_for`)
+- On timeout, user gets a friendly message instead of a hang
+
+### Retry Logic (`agent/retry.py`)
+- Automatic retry with exponential backoff (1s, 2s, 4s) for transient failures
+- Handles: 429 (rate limit, reads retry-after), 500/502/503/529, timeouts, connection errors
+- Max 3 retries before re-raising
+
+### Error Handling
+- `execute_tool()` never raises — catches all exceptions and returns error strings
+- Agent sees error messages and can explain them naturally
+- Errors reported to `#bot-errors` Discord channel with full context
+- Error reporter: `communication/error_reporter.py`
+
+### Graceful Degradation
+- ChromaDB failure: agent proceeds without KB context (logs warning)
+- Scheduler crash: `try/except` around each sync iteration, scheduler loop survives failures
+
+### Memory Safety
+- Per-agent `asyncio.Lock` for concurrent memory writes (`append_memory_safe()`)
+
+### Structured Logging
+- `LOG_FORMAT=json` for Railway (structured JSON output)
+- `LOG_FORMAT=text` for local dev (default, human-readable)
+
+### Health Check
+- `/health` checks SQLite, ChromaDB, Discord, Anthropic key
+- Returns `"ok"` or `"degraded"` with per-subsystem status
+
 ## Known Issues
-- **CRITICAL — Agent hangs on Railway**: The Anthropic SDK uses a sync httpx client (`self.client.messages.create()` in `core.py:73`), but it runs inside the async Discord event loop. On heavy tool-use conversations, the sync SSL read blocks the entire event loop and the process freezes. **Fix needed**: switch to `anthropic.AsyncAnthropic` and `await self.client.messages.create()` in `core.py`, or run the sync client in a thread executor. This is the #1 priority for next session.
-- Anthropic rate limits hit on heavy queries — need to handle 429s gracefully
 - ngrok has a stale session — don't touch it, runs existing Twilio voice agent for 628 number
 - macOS Python needs SSL_CERT_FILE set via certifi (handled in startup code)
 - 628 number calls appear on dashboard with ~5 min delay (ElevenLabs transcript sync interval)

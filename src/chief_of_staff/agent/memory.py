@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime
@@ -11,6 +12,16 @@ logger = logging.getLogger(__name__)
 
 # Base directory for agent memory files
 MEMORY_DIR = Path(os.environ.get("AGENT_MEMORY_DIR", "./agent_memory"))
+
+# Per-agent write locks for concurrent safety
+_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_lock(agent_name: str) -> asyncio.Lock:
+    """Get or create a per-agent asyncio lock."""
+    if agent_name not in _locks:
+        _locks[agent_name] = asyncio.Lock()
+    return _locks[agent_name]
 
 
 def _memory_path(agent_name: str) -> Path:
@@ -28,7 +39,7 @@ def read_memory(agent_name: str) -> str:
 
 
 def append_memory(agent_name: str, content: str, category: str = "general") -> str:
-    """Append a new entry to an agent's memory. Returns the updated memory."""
+    """Append a new entry to an agent's memory (sync version). Returns the updated memory."""
     path = _memory_path(agent_name)
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
@@ -43,6 +54,13 @@ def append_memory(agent_name: str, content: str, category: str = "general") -> s
     path.write_text(updated)
     logger.info(f"Memory appended for {agent_name}: [{category}] {content[:100]}...")
     return updated
+
+
+async def append_memory_safe(agent_name: str, content: str, category: str = "general") -> str:
+    """Async-safe memory append with per-agent locking."""
+    lock = _get_lock(agent_name)
+    async with lock:
+        return append_memory(agent_name, content, category)
 
 
 def search_memory(agent_name: str, query: str) -> list[str]:

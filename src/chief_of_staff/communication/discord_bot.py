@@ -46,7 +46,10 @@ class ChiefOfStaffBot(discord.Client):
 
     def _get_triage_client(self):
         if self._triage_client is None:
-            self._triage_client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            self._triage_client = anthropic.AsyncAnthropic(
+                api_key=settings.anthropic_api_key,
+                timeout=30.0,
+            )
         return self._triage_client
 
     async def on_ready(self):
@@ -100,12 +103,11 @@ class ChiefOfStaffBot(discord.Client):
                 message=message.content[:500],
                 context=context[:1000],
             )
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, lambda: client.messages.create(
+            response = await client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=10,
                 messages=[{"role": "user", "content": prompt}],
-            ))
+            )
             answer = response.content[0].text.strip().upper()
             logger.info(f"Triage for #{getattr(message.channel, 'name', 'DM')} from {message.author}: {answer}")
             return answer.startswith("YES")
@@ -209,6 +211,17 @@ class ChiefOfStaffBot(discord.Client):
                     channel="discord",
                     user_id=f"discord:{message.author.id}",
                 )
+                # Report error to #bot-errors channel
+                try:
+                    from chief_of_staff.communication.error_reporter import report_error
+                    await report_error(
+                        bot=self,
+                        error_msg=str(e),
+                        context=f"#{channel_name} from {message.author.display_name}",
+                        user_msg=content[:200],
+                    )
+                except Exception:
+                    logger.error("Failed to report error to #bot-errors", exc_info=True)
                 await message.reply("Something went wrong processing your message. Please try again.")
 
     async def _build_history(self, channel, limit: int = 10) -> list[dict[str, Any]]:

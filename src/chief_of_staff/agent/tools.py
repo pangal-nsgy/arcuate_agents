@@ -282,7 +282,27 @@ def get_server_tools(server_tools_config: list[dict[str, Any]]) -> list[dict[str
 
 
 async def execute_tool(name: str, args: dict[str, Any], agent_name: str = "chief_of_staff") -> str:
-    """Execute a tool call and return the result as a string."""
+    """Execute a tool call and return the result as a string.
+
+    Never raises — always returns a string (error message on failure).
+    """
+    try:
+        return await _execute_tool_inner(name, args, agent_name)
+    except Exception as e:
+        error_type = type(e).__name__
+        error_msg = str(e)[:500]
+        logger.error(f"Tool '{name}' failed: {error_type}: {error_msg}", exc_info=True)
+        from chief_of_staff.agent.activity import log_activity, ERROR
+        log_activity(
+            agent_name=agent_name,
+            action_type=ERROR,
+            action_detail=f"Tool '{name}' error: {error_type}: {error_msg}",
+        )
+        return f"Tool '{name}' encountered an error: {error_type}: {error_msg}. Try a different approach."
+
+
+async def _execute_tool_inner(name: str, args: dict[str, Any], agent_name: str = "chief_of_staff") -> str:
+    """Inner tool execution — may raise exceptions (caught by execute_tool)."""
 
     # --- Knowledge tools ---
     if name == "search_knowledge":
@@ -465,11 +485,11 @@ async def execute_tool(name: str, args: dict[str, Any], agent_name: str = "chief
     # --- Memory tools ---
     elif name == "remember":
         from chief_of_staff.agent.activity import log_activity, MEMORY_WRITE
-        from chief_of_staff.agent.memory import append_memory
+        from chief_of_staff.agent.memory import append_memory_safe
 
         content = args["content"]
         category = args.get("category", "general")
-        append_memory(agent_name, content, category)
+        await append_memory_safe(agent_name, content, category)
 
         log_activity(
             agent_name=agent_name,

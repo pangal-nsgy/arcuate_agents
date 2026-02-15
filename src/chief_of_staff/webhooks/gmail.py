@@ -55,7 +55,8 @@ async def gmail_push_notification(request: Request) -> dict:
         logger.info(f"Gmail push: new mail for {email_address}, historyId={history_id}")
 
     # Verify subscription matches expected (basic authenticity check)
-    subscription = message.get("subscription", "")
+    # Pub/Sub push puts subscription at top level, not inside message
+    subscription = body.get("subscription", "") or message.get("subscription", "")
     if settings.gmail_pubsub_subscription and subscription:
         if subscription != settings.gmail_pubsub_subscription:
             logger.warning(f"Gmail push: unexpected subscription '{subscription}', ignoring")
@@ -92,25 +93,38 @@ async def _process_new_emails() -> None:
     try:
         service = get_gmail_service()
 
-        # Fetch recent emails (not is:unread — use time-based to avoid mark-as-read races)
-        results = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: service.users().messages().list(
-                userId="me", maxResults=10, q="newer_than:1h",
-            ).execute(),
-        )
-        messages = results.get("messages", [])
-        if not messages:
+        # Fetch recent emails with pagination (not is:unread — time-based to avoid races)
+        all_messages: list[dict] = []
+        page_token = None
+        while len(all_messages) < 50:
+            batch_size = min(50, 50 - len(all_messages))
+            results = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda pt=page_token, bs=batch_size: service.users().messages().list(
+                    userId="me", maxResults=bs, q="newer_than:1h", pageToken=pt,
+                ).execute(),
+            )
+            batch = results.get("messages", [])
+            if not batch:
+                break
+            all_messages.extend(batch)
+            page_token = results.get("nextPageToken")
+            if not page_token:
+                break
+
+        if not all_messages:
             return
 
-        logger.info(f"Gmail push: processing {len(messages)} recent messages")
+        logger.info(f"Gmail push: processing {len(all_messages)} recent messages")
 
-        for msg_ref in messages:
+        for msg_ref in all_messages:
             gmail_id = msg_ref["id"]
 
-            # Idempotency: skip already-processed messages
+            # Atomic claim: mark as processed FIRST to prevent concurrent duplicates.
+            # If another task already claimed it, skip. Uses INSERT OR IGNORE.
             if is_gmail_message_processed(gmail_id):
                 continue
+            mark_gmail_message_processed(gmail_id)
 
             try:
                 msg = await asyncio.get_event_loop().run_in_executor(
@@ -123,11 +137,24 @@ async def _process_new_emails() -> None:
                 headers = {h["name"].lower(): h["value"] for h in msg["payload"]["headers"]}
                 from_addr = headers.get("from", "unknown")
                 to_addr = headers.get("to", "")
+                cc_addr = headers.get("cc", "")
                 subject = headers.get("subject", "(no subject)")
                 message_id = headers.get("message-id", "")
                 in_reply_to = headers.get("in-reply-to", "")
                 thread_id = msg.get("threadId", "")
                 labels = msg.get("labelIds", [])
+
+                # Only reply to emails addressed to the agent (To or CC)
+                if not _is_addressed_to_agent(to_addr, cc_addr):
+                    log_activity(
+                        agent_name="chief_of_staff",
+                        action_type=EMAIL_SKIPPED,
+                        action_detail=f"Skipped: not addressed to agent",
+                        channel="gmail",
+                        user_id=from_addr,
+                        metadata={"gmail_id": gmail_id, "to": to_addr, "cc": cc_addr},
+                    )
+                    continue
 
                 # Extract plain-text body
                 body = _extract_body(msg["payload"])
@@ -143,7 +170,6 @@ async def _process_new_emails() -> None:
                         user_id=from_addr,
                         metadata={"gmail_id": gmail_id, "reason": skip_reason},
                     )
-                    mark_gmail_message_processed(gmail_id)
                     continue
 
                 # Log as received
@@ -200,14 +226,14 @@ async def _process_new_emails() -> None:
                     subject=subject,
                 )
 
-                mark_gmail_message_processed(gmail_id)
-
             except Exception as e:
-                logger.error(f"Failed to process email {gmail_id}: {e}")
-                mark_gmail_message_processed(gmail_id)  # Don't retry failures forever
+                # Don't mark-unprocessed on failure — already claimed above.
+                # Pub/Sub may redeliver, but the claim prevents duplicate replies.
+                # Log with full context for debugging.
+                logger.error(f"Failed to process email {gmail_id}: {e}", exc_info=True)
 
     except Exception as e:
-        logger.error(f"Gmail push background task failed: {e}")
+        logger.error(f"Gmail push background task failed: {e}", exc_info=True)
 
 
 async def _send_reply(
@@ -320,6 +346,15 @@ async def _send_reply(
     )
 
     logger.info(f"Email reply sent to {from_addr}, thread={thread_id}, id={sent_id}")
+
+
+def _is_addressed_to_agent(to_addr: str, cc_addr: str) -> bool:
+    """Check if the agent's email appears in the To or CC fields."""
+    agent_email = settings.chief_email.lower()
+    if not agent_email:
+        return True  # No agent email configured — process all
+    combined = f"{to_addr} {cc_addr}".lower()
+    return agent_email in combined
 
 
 def _is_filtered(from_addr: str, headers: dict[str, str], labels: list[str]) -> str | None:

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from chief_of_staff.webhooks.gmail import _is_filtered, _detect_complaint
+from chief_of_staff.webhooks.gmail import _is_filtered, _detect_complaint, _is_addressed_to_agent
 
 
 # --- Loop prevention / filtering tests ---
@@ -127,6 +127,44 @@ class TestEmailFiltering:
                 ["INBOX"],
             )
         assert result is None
+
+
+# --- Addressed-to-agent tests ---
+
+class TestAddressedToAgent:
+    """Only reply to emails addressed to the agent."""
+
+    def test_agent_in_to_field(self):
+        """Agent email in To field passes."""
+        with patch("chief_of_staff.webhooks.gmail.settings") as mock_settings:
+            mock_settings.chief_email = "agent1@arcuatehealth.com"
+            assert _is_addressed_to_agent("agent1@arcuatehealth.com", "") is True
+
+    def test_agent_in_cc_field(self):
+        """Agent email in CC field passes."""
+        with patch("chief_of_staff.webhooks.gmail.settings") as mock_settings:
+            mock_settings.chief_email = "agent1@arcuatehealth.com"
+            assert _is_addressed_to_agent("other@example.com", "agent1@arcuatehealth.com") is True
+
+    def test_agent_not_addressed(self):
+        """Email not addressed to agent is rejected."""
+        with patch("chief_of_staff.webhooks.gmail.settings") as mock_settings:
+            mock_settings.chief_email = "agent1@arcuatehealth.com"
+            assert _is_addressed_to_agent("someone@example.com", "other@example.com") is False
+
+    def test_no_agent_email_configured(self):
+        """If no agent email configured, allow all (graceful degradation)."""
+        with patch("chief_of_staff.webhooks.gmail.settings") as mock_settings:
+            mock_settings.chief_email = ""
+            assert _is_addressed_to_agent("anyone@example.com", "") is True
+
+    def test_agent_in_multi_recipient_to(self):
+        """Agent found among multiple To recipients."""
+        with patch("chief_of_staff.webhooks.gmail.settings") as mock_settings:
+            mock_settings.chief_email = "agent1@arcuatehealth.com"
+            assert _is_addressed_to_agent(
+                "bob@example.com, agent1@arcuatehealth.com, alice@example.com", ""
+            ) is True
 
 
 # --- Idempotency tests ---

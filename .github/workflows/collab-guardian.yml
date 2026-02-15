@@ -111,7 +111,10 @@ jobs:
         run: |
           echo "Validating app imports and startup..."
           PYTHONPATH=src python3 -c "
-          import sys
+          import sys, os
+          os.environ.setdefault('AGENTS_DIR', 'agents')
+          os.environ.setdefault('AGENT_MEMORY_DIR', 'agent_memory')
+
           print('[1/3] Importing main app module...')
           from chief_of_staff.main import app
           print(f'  OK — FastAPI app loaded: {len(app.routes)} routes')
@@ -119,16 +122,15 @@ jobs:
           print('[2/3] Importing agent system...')
           from chief_of_staff.agent.core import get_agent, get_agent_by_name
           from chief_of_staff.agent.tools import execute_tool
-          from chief_of_staff.agent.registry import load_agent_config
+          from chief_of_staff.agent.registry import AgentRegistry, get_registry
           from chief_of_staff.agent.router import resolve_agent
           print('  OK — agent core, tools, registry, router imported')
 
           print('[3/3] Validating agent configs load...')
-          import os
-          os.environ.setdefault('AGENTS_DIR', 'agents')
+          registry = get_registry()
           for name in ['chief_of_staff', 'onboarding']:
               try:
-                  cfg = load_agent_config(name)
+                  cfg = registry.get(name)
                   tools = cfg.get_resolved_tools()
                   print(f'  OK — {name}: {len(tools)} tools loaded')
               except Exception as e:

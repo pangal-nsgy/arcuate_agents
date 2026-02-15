@@ -1,0 +1,113 @@
+# Architecture Changelog
+# =====================
+# Track architecture-level changes: new tools, modules, integrations, config changes.
+# This file is read by the dashboard System tab and displayed as a timeline.
+#
+# Format:
+#   - date: YYYY-MM-DD
+#     author: who made the change
+#     category: tools | modules | integrations | config | deployment | security
+#     title: short description
+#     details: longer explanation (optional)
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: security
+  title: Production hardening — async, retry, timeouts, error handling
+  details: >
+    Switched to AsyncAnthropic, added retry logic (retry.py), 3-level timeouts
+    (120s/60s/30s), error wrapping (tools never raise), error reporter to
+    #bot-errors Discord channel, graceful ChromaDB degradation, async memory locks,
+    structured JSON logging, enhanced /health endpoint.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: modules
+  title: Added code self-modification system (code_ops.py)
+  details: >
+    Agent can read, edit, and deploy its own source code via GitHub REST API.
+    Safety: blocked paths, syntax validation (ast.parse/yaml.safe_load),
+    permission-gated, audit trail. Uses Git Data API for atomic commits.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: modules
+  title: Added persistent memory system (memory.py)
+  details: >
+    Per-agent .md files in agent_memory/. Async-safe with per-agent locks.
+    Tools: remember, recall_memory. Memory is included in system prompt context.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: modules
+  title: Added sub-agent delegation system
+  details: >
+    create_sub_agent creates new agents from YAML at runtime.
+    delegate_task sends tasks to sub-agents and returns results.
+    Max delegation depth configurable per agent.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: tools
+  title: Expanded to 17 tools across 6 categories
+  details: >
+    Knowledge (3), Communication (3), Self-Mod (3), Memory (2),
+    Delegation (2), Code Ops (3), plus web_search server tool.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: modules
+  title: Added activity tracking (22 action types)
+  details: >
+    All agent actions logged to SQLite agent_activity table.
+    9 files wired up for comprehensive tracking across all channels.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: modules
+  title: Added live web dashboard
+  details: >
+    Single-page app at /dashboard with activity feed, stats cards,
+    agent sidebar, filters, auto-refresh. Dark theme, monospace font.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: integrations
+  title: Discord bot as primary interface
+  details: >
+    Replaced SMS as primary channel. Bot responds to DMs, @mentions,
+    and configured channels. Dynamic triage with trigger words + LLM.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: deployment
+  title: Railway deployment with auto-deploy
+  details: >
+    Dockerfile (Python 3.12-slim), persistent volume at /app/data,
+    auto-deploys on push to deploy branch. All env vars configured.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: config
+  title: Config-driven agent system (YAML)
+  details: >
+    Agents defined in agents/*.yaml. Self-modifiable at runtime.
+    Registry re-reads from disk on every get() call for live reload.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: modules
+  title: Dashboard System tab + architecture changelog
+  details: >
+    Added System tab to dashboard showing architecture changelog,
+    tool registry, module overview, and recent code deployments.
+    Architecture changes tracked in architecture_changelog.yaml.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: config
+  title: Collaboration rails — CLAUDE.md, .env.example, README updates
+  details: >
+    Rewrote CLAUDE.md as canonical agent onboarding doc. Updated .env.example
+    with required/optional markers and full docs. Updated README for
+    multi-developer collaboration workflow.

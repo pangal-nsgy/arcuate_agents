@@ -8,6 +8,7 @@ COPY src/ src/
 COPY scripts/ scripts/
 COPY agents/ agents/
 COPY agent_memory/ agent_memory/
+COPY architecture_changelog.yaml .
 
 # Install Python dependencies (needs src/ present for the package build)
 RUN pip install --no-cache-dir .

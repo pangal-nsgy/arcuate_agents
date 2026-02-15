@@ -37,15 +37,23 @@ PYTHONPATH=src pytest tests/ -v
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full developer setup, and [SETUP.md](SETUP.md) for first-time credential setup (Google OAuth, Twilio, Zoom).
 
-### Collaboration Workflow
+### Collaboration Workflow (AI-Gated Deploys)
 
-Multiple developers (and their AI agents) can work on this repo simultaneously:
+Multiple developers (and their AI agents) can push freely — Opus 4.6 reviews everything before it hits production:
 
-1. **Read `CLAUDE.md`** — it has the architecture, conventions, and "how to add X" guides
-2. **Check `.env.example`** — all env vars documented with required/optional markers
-3. **Check the dashboard System tab** — shows architecture changelog, tool registry, recent deploys
-4. **When you change the architecture** — update `CLAUDE.md` and add an entry to `architecture_changelog.yaml`
-5. **Deploy** — push to the deploy branch, Railway auto-deploys
+```
+git push origin dev  →  Linter  →  Opus 4.6 review  →  Auto-merge to deploy  →  Railway deploys
+                                         ↓ (rejected)
+                                    Discord: "BLOCKED — here's why"
+```
+
+1. **Push to `dev`** — never push directly to the deploy branch
+2. **Opus 4.6 reviews** your diff for breaking changes, conflicts, security issues
+3. **If approved** — auto-merges to deploy branch, Railway auto-deploys
+4. **If rejected** — Discord notification in #agent-building with what's wrong
+5. **Pre-push hook** — runs consistency linter locally before push (install: `bash scripts/install-hooks.sh`)
+
+See [`CLAUDE.md`](CLAUDE.md) for full architecture docs, conventions, and "how to add X" guides.
 
 ### Key Files for Onboarding
 

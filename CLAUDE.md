@@ -138,7 +138,16 @@ arcuate_agents/
 │   ├── dashboard/               # Web dashboard (routes + embedded HTML)
 │   └── webhooks/                # Incoming webhook handlers
 │
+├── .githooks/                   # Git hooks (install via scripts/install-hooks.sh)
+│   └── pre-push                 # Pre-push: linter + syntax checks
+│
+├── .github/workflows/           # GitHub Actions
+│   └── collab-guardian.yml      # AI gatekeeper: linter → Opus review → merge → Discord
+│
 ├── scripts/                     # Setup and utility scripts
+│   ├── ai_review.py             # AI code reviewer (Opus 4.6, standalone, runs in CI)
+│   ├── lint_consistency.py      # Consistency linter (tools ↔ handlers, YAML, activity)
+│   ├── install-hooks.sh         # One-time git hook installer
 │   ├── setup_google_auth.py     # Run Google OAuth flow
 │   ├── validate_credentials.py  # Verify all API keys work
 │   └── ingest_initial.py        # One-time historical data ingestion

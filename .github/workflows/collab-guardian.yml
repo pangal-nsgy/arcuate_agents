@@ -117,7 +117,7 @@ jobs:
           print(f'  OK — FastAPI app loaded: {len(app.routes)} routes')
 
           print('[2/3] Importing agent system...')
-          from chief_of_staff.agent.core import run_agent_loop
+          from chief_of_staff.agent.core import get_agent, get_agent_by_name
           from chief_of_staff.agent.tools import execute_tool
           from chief_of_staff.agent.registry import load_agent_config
           from chief_of_staff.agent.router import resolve_agent

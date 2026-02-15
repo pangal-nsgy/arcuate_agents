@@ -53,6 +53,9 @@ SMS_SENT = "sms_sent"
 # Ingestion
 CALL_INGESTED = "call_ingested"
 EMAIL_INGESTED = "email_ingested"
+EMAIL_RECEIVED = "email_received"
+EMAIL_SENT = "email_sent"
+EMAIL_SKIPPED = "email_skipped"
 DOC_INGESTED = "doc_ingested"
 MEETING_INGESTED = "meeting_ingested"
 INGESTION_SYNC = "ingestion_sync"
@@ -217,6 +220,9 @@ def get_activity_stats(hours: int = 24) -> dict[str, Any]:
         "errors": by_type.get(ERROR, 0),
         "calls_ingested": by_type.get(CALL_INGESTED, 0),
         "emails_ingested": by_type.get(EMAIL_INGESTED, 0),
+        "emails_received": by_type.get(EMAIL_RECEIVED, 0),
+        "emails_sent": by_type.get(EMAIL_SENT, 0),
+        "emails_skipped": by_type.get(EMAIL_SKIPPED, 0),
         "docs_ingested": by_type.get(DOC_INGESTED, 0),
         "meetings_ingested": by_type.get(MEETING_INGESTED, 0),
         "sync_cycles": by_type.get(INGESTION_SYNC, 0),

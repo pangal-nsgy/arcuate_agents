@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     chief_email: str = ""
     founder_phone_numbers: list[str] = []
     messaging_channel: str = "whatsapp"  # "sms" or "whatsapp"
+    founder_emails: list[str] = []
+    email_visibility_mode: str = "cc"  # "cc" or "bcc"
+    gmail_pubsub_subscription: str = ""  # expected Pub/Sub subscription for webhook auth
     webhook_base_url: str = "http://localhost:8000"
 
     # Server

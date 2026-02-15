@@ -50,6 +50,37 @@ CREATE TABLE IF NOT EXISTS tasks (
     created_at TEXT NOT NULL,
     completed_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS email_conversations (
+    id TEXT PRIMARY KEY,
+    email_address TEXT NOT NULL,
+    thread_id TEXT,
+    gmail_message_id TEXT UNIQUE,
+    rfc_message_id TEXT,
+    direction TEXT NOT NULL,
+    subject TEXT,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_conv_thread ON email_conversations(thread_id);
+CREATE INDEX IF NOT EXISTS idx_email_conv_addr ON email_conversations(email_address);
+CREATE INDEX IF NOT EXISTS idx_email_conv_created ON email_conversations(created_at);
+
+CREATE TABLE IF NOT EXISTS processed_gmail_events (
+    gmail_message_id TEXT PRIMARY KEY,
+    processed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS complaints (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    thread_id TEXT,
+    severity TEXT NOT NULL DEFAULT 'medium',
+    summary TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -131,4 +162,83 @@ def search_documents(query: str, source: str | None = None, limit: int = 10) -> 
                 "SELECT * FROM documents WHERE title LIKE ? OR content_preview LIKE ? ORDER BY updated_at DESC LIMIT ?",
                 (f"%{query}%", f"%{query}%", limit),
             ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def log_email_conversation(
+    conv_id: str,
+    email_address: str,
+    direction: str,
+    body: str,
+    thread_id: str = "",
+    gmail_message_id: str = "",
+    rfc_message_id: str = "",
+    subject: str = "",
+) -> None:
+    """Log an email conversation turn. Skips silently on duplicate gmail_message_id."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO email_conversations
+            (id, email_address, thread_id, gmail_message_id, rfc_message_id, direction, subject, body, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (conv_id, email_address, thread_id, gmail_message_id, rfc_message_id, direction, subject, body, now),
+        )
+
+
+def get_email_thread(thread_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Fetch email conversation history for a thread, ordered by time."""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM email_conversations WHERE thread_id = ? ORDER BY created_at ASC LIMIT ?",
+            (thread_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def is_gmail_message_processed(gmail_message_id: str) -> bool:
+    """Check if a Gmail message has already been processed (idempotency)."""
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM processed_gmail_events WHERE gmail_message_id = ?",
+            (gmail_message_id,),
+        ).fetchone()
+    return row is not None
+
+
+def mark_gmail_message_processed(gmail_message_id: str) -> None:
+    """Mark a Gmail message as processed."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO processed_gmail_events (gmail_message_id, processed_at) VALUES (?, ?)",
+            (gmail_message_id, now),
+        )
+
+
+def log_complaint(
+    complaint_id: str,
+    source: str,
+    sender: str,
+    summary: str,
+    thread_id: str = "",
+    severity: str = "medium",
+) -> None:
+    """Persist a complaint for future supervised review."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            """INSERT INTO complaints (id, source, sender, thread_id, severity, summary, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'open', ?)""",
+            (complaint_id, source, sender, thread_id, severity, summary, now),
+        )
+
+
+def get_open_complaints(limit: int = 50) -> list[dict[str, Any]]:
+    """Get open complaints for review."""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM complaints WHERE status = 'open' ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
     return [dict(r) for r in rows]

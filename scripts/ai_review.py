@@ -170,7 +170,7 @@ def call_claude(prompt: str, api_key: str) -> dict:
 
     if resp.status_code != 200:
         print(f"[ERROR] Claude API returned {resp.status_code}: {resp.text[:500]}")
-        return {"decision": "APPROVE", "summary": "API error — approving to avoid blocking", "issues": []}
+        return {"decision": "REJECT", "summary": "API error — rejecting to prevent unsafe deploy", "issues": []}
 
     response_text = resp.json()["content"][0]["text"].strip()
 
@@ -186,7 +186,7 @@ def call_claude(prompt: str, api_key: str) -> dict:
     except json.JSONDecodeError:
         print(f"[ERROR] Could not parse Claude response as JSON")
         print(f"  Response: {response_text[:500]}")
-        return {"decision": "APPROVE", "summary": "Parse error — approving to avoid blocking", "issues": []}
+        return {"decision": "REJECT", "summary": "Parse error — rejecting to prevent unsafe deploy", "issues": []}
 
 
 def main() -> int:

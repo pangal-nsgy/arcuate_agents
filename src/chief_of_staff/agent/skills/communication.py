@@ -29,6 +29,11 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "to": {"type": "string", "description": "Recipient email address"},
                 "subject": {"type": "string", "description": "Email subject line"},
                 "body": {"type": "string", "description": "Email body (plain text)"},
+                "cc": {"type": "string", "description": "Comma-separated CC addresses"},
+                "bcc": {"type": "string", "description": "Comma-separated BCC addresses"},
+                "in_reply_to": {"type": "string", "description": "Message-ID of the email being replied to"},
+                "references": {"type": "string", "description": "Space-separated Message-IDs for threading"},
+                "thread_id": {"type": "string", "description": "Gmail thread ID for grouping replies"},
             },
             "required": ["to", "subject", "body"],
         },
@@ -62,7 +67,16 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
 
     elif name == "send_email":
         from chief_of_staff.communication.email import send_email
-        result = await send_email(to=args["to"], subject=args["subject"], body=args["body"])
+        result = await send_email(
+            to=args["to"],
+            subject=args["subject"],
+            body=args["body"],
+            cc=args.get("cc", ""),
+            bcc=args.get("bcc", ""),
+            in_reply_to=args.get("in_reply_to", ""),
+            references=args.get("references", ""),
+            thread_id=args.get("thread_id", ""),
+        )
         return f"Email sent to {args['to']}: {result}"
 
     elif name == "draft_document":

@@ -42,16 +42,20 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full developer setup, and [SETUP.md](
 Multiple developers (and their AI agents) can push freely — Opus 4.6 reviews everything before it hits production:
 
 ```
-git push origin dev  →  Linter  →  Opus 4.6 review  →  Auto-merge to deploy  →  Railway deploys
-                                         ↓ (rejected)
-                                    Discord: "BLOCKED — here's why"
+Push to dev  →  Linter → Tests → Build → Opus 4.6 → Staging check → Deploy → Discord
+                                                        ↓ (rejected)
+                                                   Discord: "BLOCKED — here's why"
+
+Open PR to dev  →  Same validation  →  Opus 4.6 auto-merges PR  →  Triggers deploy
 ```
 
-1. **Push to `dev`** — never push directly to the deploy branch
-2. **Opus 4.6 reviews** your diff for breaking changes, conflicts, security issues
-3. **If approved** — auto-merges to deploy branch, Railway auto-deploys
-4. **If rejected** — Discord notification in #agent-building with what's wrong
-5. **Pre-push hook** — runs consistency linter locally before push (install: `bash scripts/install-hooks.sh`)
+1. **Push to `dev`** (direct) or **open a PR** — never push directly to the deploy branch
+2. **Full validation pipeline**: linter → pytest → build check → Opus 4.6 review → staging health check
+3. **PRs auto-merge** — if Opus 4.6 approves, the PR is squash-merged automatically (no manual review needed)
+4. **If approved** — auto-merges to deploy branch, Railway auto-deploys
+5. **If rejected** — Discord notification in #agent-building with what's wrong
+6. **Staging environment** — every push to `dev` deploys to staging first; Guardian verifies `/health` before allowing production deploy
+7. **Pre-push hook** — runs consistency linter locally before push (install: `bash scripts/install-hooks.sh`)
 
 See [`CLAUDE.md`](CLAUDE.md) for full architecture docs, conventions, and "how to add X" guides.
 

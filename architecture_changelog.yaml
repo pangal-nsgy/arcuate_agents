@@ -13,6 +13,18 @@
 - date: "2026-02-15"
   author: dhiraj + claude
   category: deployment
+  title: "Guardian v4: staging environment, PR auto-merge, build validation"
+  details: >
+    Added Railway staging environment (arcuate-staging) watching dev branch.
+    Guardian now checks staging /health before allowing production deploy.
+    PRs are auto-approved and squash-merged by Opus 4.6 when all checks pass.
+    Build validation step verifies app imports, agent system loads, and configs parse.
+    3-job pipeline: validate → auto-merge-pr (or deploy) → Discord notifications.
+    Discord notifications fire on both pushes and PRs (blue/green/purple/red/yellow).
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: deployment
   title: "Guardian v2: full-diff review, pytest in CI, AI conflict resolution"
   details: >
     Upgraded Collaboration Guardian for async collaboration: AI review now diffs

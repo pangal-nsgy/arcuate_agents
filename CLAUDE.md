@@ -404,6 +404,14 @@ The dashboard is a single-page app embedded in `dashboard/routes.py` with two ta
 - **Persistent volume**: `/app/data` for SQLite DB and ChromaDB
 - **Env vars**: configured in Railway dashboard (mirrors `.env` but uses `GOOGLE_TOKEN_JSON` instead of file paths, `LOG_FORMAT=json`)
 - **Health check**: `GET /health` — checks SQLite, ChromaDB, Discord, Anthropic key
+- **Production URL**: `ravishing-patience-production-f793.up.railway.app`
+
+### Railway (staging)
+- **Service**: `arcuate-staging` in the `staging` environment
+- **Branch**: watches `dev` — auto-deploys on every push to dev (before production)
+- **URL**: `arcuate-staging-staging.up.railway.app`
+- **Purpose**: Guardian checks staging health before merging to production. If staging is broken, production deploy is blocked.
+- **Env vars**: mirrors production (copied from prod, with staging-specific overrides)
 
 ### Local development
 ```bash
@@ -415,18 +423,25 @@ PYTHONPATH=src uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8000
 - Dashboard at `http://localhost:8000/dashboard`
 
 ### Deploy workflow (AI-gated)
+
+**Two paths to production** — both fully automated, both reviewed by Opus 4.6:
+
+**Path 1: Direct push (for Dhiraj)**
 ```bash
-git add <files>
-git commit -m "description"
-git push origin dev          # push to dev, NOT directly to deploy
-# → GitHub Action fires (full history checkout)
-# → Consistency linter runs
-# → pytest runs full test suite
-# → Opus 4.6 reviews the FULL diff (against deploy branch, catches multi-commit pushes)
-# → If approved: auto-merges dev → deploy branch
-#     → If merge conflicts: Opus 4.6 auto-resolves them
-# → Railway deploys
+git push origin dev
+# → GitHub Action fires
+# → Linter → pytest → build validation → Opus 4.6 review → staging health check
+# → If approved: auto-merges dev → deploy branch → Railway deploys → Discord notification
 # → If rejected: Discord notification with what's wrong, nothing deployed
+```
+
+**Path 2: Pull request (for collaborators like dadonoho)**
+```
+Open PR targeting dev
+# → GitHub Action fires (same validation pipeline)
+# → If approved: Opus 4.6 auto-approves and squash-merges the PR
+# → The merge triggers Path 1 → deploys to production
+# → If rejected: Discord notification, PR stays open
 ```
 
 **Never push directly to the deploy branch** — always push to `dev` and let the AI gatekeeper decide.
@@ -486,12 +501,15 @@ AI-powered code review system. Nobody reviews code manually — Opus 4.6 does it
 ### How it works
 
 ```
-Developer pushes to `dev` branch
+Push to `dev` OR PR targeting `dev`
   → GitHub Action triggers (full repo history for merge-base diff)
   → Step 1: Consistency linter (tools ↔ handlers, YAML, activity constants)
   → Step 2: pytest (full test suite)
-  → Step 3: Opus 4.6 code review (diffs against deploy branch, not just HEAD~1)
-  → Step 4: Auto-merge dev → deploy branch
+  → Step 3: Build validation (verify app imports + agent configs load)
+  → Step 4: Opus 4.6 code review (diffs against deploy branch, not just HEAD~1)
+  → Step 5: Staging health check (waits for staging deploy, hits /health)
+  → If PR: Opus 4.6 auto-approves and squash-merges the PR → triggers push workflow
+  → If push: Auto-merge dev → deploy branch
      → If merge conflict: Opus 4.6 resolves conflicts automatically
      → If resolution fails: merge aborted, Discord notification
   → APPROVED: Railway auto-deploys
@@ -505,7 +523,7 @@ Developer pushes to `dev` branch
 | AI reviewer | `scripts/ai_review.py` | Diffs against deploy branch (full push), sends to Opus 4.6 for review |
 | Conflict resolver | `scripts/resolve_conflicts.py` | Opus 4.6 auto-resolves merge conflicts file-by-file |
 | Consistency linter | `scripts/lint_consistency.py` | Checks tools ↔ handlers, activity constants ↔ stats, YAML validity |
-| GitHub Action | `.github/workflows/collab-guardian.yml` | Orchestrates: linter → pytest → AI review → merge (+ resolve) → Discord |
+| GitHub Action | `.github/workflows/collab-guardian.yml` | 3-job pipeline: validate → auto-merge PR (or deploy) → Discord |
 | Pre-push hook | `.githooks/pre-push` | Local safety net: linter + syntax checks before push |
 | Hook installer | `scripts/install-hooks.sh` | One-time: `bash scripts/install-hooks.sh` |
 | code_ops retry | `src/chief_of_staff/agent/code_ops.py` | `deploy_changes` retries on 422 (non-fast-forward) |
@@ -522,10 +540,12 @@ Developer pushes to `dev` branch
 
 ### Discord notifications (#agent-building)
 
-- **Blue**: Push received, Opus reviewing...
+- **Blue**: Push/PR received, Opus reviewing...
 - **Green**: Approved & merged to deploy — Railway will auto-deploy
 - **Green** (variant): Approved, conflicts resolved by Opus 4.6 & deployed
-- **Red**: BLOCKED — lint failed, tests failed, or AI rejected (with details)
+- **Green** (PR): PR validated — ready to merge (or auto-merged)
+- **Purple**: PR auto-merged by Opus 4.6 — deploy pipeline firing
+- **Red**: BLOCKED — lint failed, tests failed, build broken, staging unhealthy, or AI rejected
 - **Yellow**: AI approved but merge failed (even after conflict resolution attempt)
 
 ---
@@ -539,7 +559,9 @@ Developer pushes to `dev` branch
 - **Knowledge base**: 500+ emails, 27 Google Docs, 35+ ElevenLabs transcripts
 - **Code self-modification**: Working — agent can read/edit/deploy via Discord
 - **Dashboard**: Live with Activity and System tabs
-- **Railway**: Deployed, auto-deploys on push
+- **Railway**: Production + staging environments, auto-deploy on push
+- **Staging**: `arcuate-staging-staging.up.railway.app` — watches `dev`, health-checked before prod deploy
+- **CI/CD**: 3-job Guardian pipeline (validate → auto-merge PR → deploy), fully automated
 - **Tests**: 63 tests passing (skills, routing, core loop, tools, retry, errors, linter)
 - **SMS via Twilio**: Functional but unreliable delivery — Discord preferred
 - **Zoom/Recall.ai**: Code built, credentials not configured (degrades gracefully)

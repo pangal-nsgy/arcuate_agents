@@ -81,8 +81,8 @@ async def _process_new_emails() -> None:
     """Background task: fetch new emails, filter, ingest, and reply if appropriate."""
     from chief_of_staff.communication._google_auth import get_gmail_service
     from chief_of_staff.knowledge.database import (
-        is_gmail_message_processed,
-        mark_gmail_message_processed,
+        try_claim_gmail_message,
+        unclaim_gmail_message,
         log_email_conversation,
         log_complaint,
     )
@@ -120,12 +120,12 @@ async def _process_new_emails() -> None:
         for msg_ref in all_messages:
             gmail_id = msg_ref["id"]
 
-            # Atomic claim: mark as processed FIRST to prevent concurrent duplicates.
-            # If another task already claimed it, skip. Uses INSERT OR IGNORE.
-            if is_gmail_message_processed(gmail_id):
+            # Atomic claim: INSERT OR IGNORE + rowcount in a single call.
+            # If another task already claimed it, try_claim returns False.
+            if not try_claim_gmail_message(gmail_id):
                 continue
-            mark_gmail_message_processed(gmail_id)
 
+            reply_sent = False
             try:
                 msg = await asyncio.get_event_loop().run_in_executor(
                     None,
@@ -213,6 +213,7 @@ async def _process_new_emails() -> None:
                     gmail_id=gmail_id,
                     complaint_severity=severity if is_complaint else "",
                 )
+                reply_sent = True
 
                 # Log inbound conversation turn (after reply, to avoid race with history)
                 log_email_conversation(
@@ -227,9 +228,10 @@ async def _process_new_emails() -> None:
                 )
 
             except Exception as e:
-                # Don't mark-unprocessed on failure — already claimed above.
-                # Pub/Sub may redeliver, but the claim prevents duplicate replies.
-                # Log with full context for debugging.
+                # Only unclaim if we haven't sent a reply yet — once an email
+                # is out the door, the claim must stay to prevent duplicate sends.
+                if not reply_sent:
+                    unclaim_gmail_message(gmail_id)
                 logger.error(f"Failed to process email {gmail_id}: {e}", exc_info=True)
 
     except Exception as e:
@@ -283,14 +285,17 @@ async def _send_reply(
         return
 
     # Determine CC/BCC for founder visibility
+    # If the sender IS a founder, skip CC/BCC entirely (no need to loop them in)
     # Complaints always BCC founders for passive awareness
     cc = ""
     bcc = ""
-    sender_email = _extract_email(from_addr)
-    founder_emails = [e for e in settings.founder_emails if e.lower() != sender_email.lower()]
+    sender_email = _extract_email(from_addr).lower()
+    sender_is_founder = any(
+        sender_email == e.lower() for e in settings.founder_emails
+    )
 
-    if founder_emails:
-        founders_str = ", ".join(founder_emails)
+    if not sender_is_founder and settings.founder_emails:
+        founders_str = ", ".join(settings.founder_emails)
         if complaint_severity or settings.email_visibility_mode == "bcc":
             bcc = founders_str
         else:

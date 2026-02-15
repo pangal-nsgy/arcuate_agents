@@ -216,6 +216,30 @@ def mark_gmail_message_processed(gmail_message_id: str) -> None:
         )
 
 
+def try_claim_gmail_message(gmail_message_id: str) -> bool:
+    """Atomically claim a Gmail message for processing.
+
+    Returns True if this caller won the claim, False if already claimed.
+    Uses INSERT OR IGNORE + rowcount to avoid check-then-mark races.
+    """
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO processed_gmail_events (gmail_message_id, processed_at) VALUES (?, ?)",
+            (gmail_message_id, now),
+        )
+        return cursor.rowcount > 0
+
+
+def unclaim_gmail_message(gmail_message_id: str) -> None:
+    """Release a claim on a Gmail message so it can be retried on transient failure."""
+    with _get_conn() as conn:
+        conn.execute(
+            "DELETE FROM processed_gmail_events WHERE gmail_message_id = ?",
+            (gmail_message_id,),
+        )
+
+
 def log_complaint(
     complaint_id: str,
     source: str,

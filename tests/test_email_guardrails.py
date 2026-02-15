@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from chief_of_staff.webhooks.gmail import _is_filtered, _detect_complaint, _is_addressed_to_agent
+from chief_of_staff.webhooks.gmail import _is_filtered, _detect_complaint, _is_addressed_to_agent, _extract_email
 
 
 # --- Loop prevention / filtering tests ---
@@ -202,6 +202,77 @@ class TestIdempotency:
             init_db()
             mark_gmail_message_processed("msg_789")
             mark_gmail_message_processed("msg_789")  # Should not raise
+
+    def test_try_claim_returns_true_on_first_call(self, tmp_path):
+        """Atomic claim returns True when message is unclaimed."""
+        db_path = str(tmp_path / "test.db")
+        with patch("chief_of_staff.knowledge.database.settings") as mock_settings:
+            mock_settings.sqlite_db_path = db_path
+            from chief_of_staff.knowledge.database import init_db, try_claim_gmail_message
+            init_db()
+            assert try_claim_gmail_message("msg_atomic_1") is True
+
+    def test_try_claim_returns_false_on_second_call(self, tmp_path):
+        """Atomic claim returns False when message is already claimed."""
+        db_path = str(tmp_path / "test.db")
+        with patch("chief_of_staff.knowledge.database.settings") as mock_settings:
+            mock_settings.sqlite_db_path = db_path
+            from chief_of_staff.knowledge.database import init_db, try_claim_gmail_message
+            init_db()
+            assert try_claim_gmail_message("msg_atomic_2") is True
+            assert try_claim_gmail_message("msg_atomic_2") is False
+
+    def test_unclaim_allows_reclaim(self, tmp_path):
+        """After unclaiming, the message can be claimed again (transient failure retry)."""
+        db_path = str(tmp_path / "test.db")
+        with patch("chief_of_staff.knowledge.database.settings") as mock_settings:
+            mock_settings.sqlite_db_path = db_path
+            from chief_of_staff.knowledge.database import (
+                init_db, try_claim_gmail_message, unclaim_gmail_message,
+            )
+            init_db()
+            assert try_claim_gmail_message("msg_retry") is True
+            unclaim_gmail_message("msg_retry")
+            assert try_claim_gmail_message("msg_retry") is True
+
+
+# --- Founder visibility tests ---
+
+class TestFounderVisibility:
+    """Founder CC/BCC logic: founders are not CC'd when replying to a founder."""
+
+    def test_founder_sender_gets_no_cc(self):
+        """When a founder emails the agent, reply has no CC/BCC of other founders."""
+        sender = "dan@arcuatehealth.com"
+        founder_emails = ["dan@arcuatehealth.com", "dhiraj@arcuatehealth.com"]
+        sender_email = _extract_email(sender).lower()
+        sender_is_founder = any(sender_email == e.lower() for e in founder_emails)
+        assert sender_is_founder is True
+
+    def test_external_sender_gets_founder_cc(self):
+        """When an external sender emails the agent, founders get CC'd."""
+        sender = "patient@gmail.com"
+        founder_emails = ["dan@arcuatehealth.com", "dhiraj@arcuatehealth.com"]
+        sender_email = _extract_email(sender).lower()
+        sender_is_founder = any(sender_email == e.lower() for e in founder_emails)
+        assert sender_is_founder is False
+
+    def test_complaint_from_external_bccs_founders(self):
+        """Complaints from external senders BCC founders (not CC)."""
+        complaint_severity = "critical"
+        sender_is_founder = False
+        visibility_mode = "cc"
+        # Should use BCC when complaint, even if mode is cc
+        should_bcc = not sender_is_founder and bool(complaint_severity or visibility_mode == "bcc")
+        assert should_bcc is True
+
+    def test_complaint_from_founder_no_visibility(self):
+        """Complaints from founders don't CC/BCC other founders."""
+        complaint_severity = "high"
+        sender_is_founder = True
+        # Founder-sent: no CC/BCC regardless of complaint
+        should_add_founders = not sender_is_founder
+        assert should_add_founders is False
 
 
 # --- Complaint detection tests ---

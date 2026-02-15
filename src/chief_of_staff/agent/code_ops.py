@@ -19,8 +19,15 @@ from chief_of_staff.config import settings
 
 logger = logging.getLogger(__name__)
 
-# In-memory staging area: {file_path: content_string}
-_staged_files: dict[str, str] = {}
+# Per-agent staging areas: {agent_name: {file_path: content_string}}
+_staged_files_by_agent: dict[str, dict[str, str]] = {}
+
+
+def _get_staging(agent_name: str = "_default") -> dict[str, str]:
+    """Get the staging area for a specific agent."""
+    if agent_name not in _staged_files_by_agent:
+        _staged_files_by_agent[agent_name] = {}
+    return _staged_files_by_agent[agent_name]
 
 # Paths that must never be read or written
 BLOCKED_PATTERNS = [
@@ -47,8 +54,18 @@ def _api_base() -> str:
 
 
 def is_path_blocked(path: str) -> str | None:
-    """Return a reason string if the path is blocked, else None."""
+    """Return a reason string if the path is blocked, else None.
+
+    Checks every segment of the path so nested tricks like
+    'src/.env/sneaky.py' are also caught.
+    """
     normalized = path.lstrip("/")
+    segments = normalized.split("/")
+    for segment in segments:
+        for pattern in BLOCKED_PATTERNS:
+            clean_pattern = pattern.rstrip("/")
+            if segment == clean_pattern:
+                return f"Blocked path: '{path}' contains blocked segment '{clean_pattern}'"
     for pattern in BLOCKED_PATTERNS:
         if normalized == pattern.rstrip("/") or normalized.startswith(pattern):
             return f"Blocked path: '{path}' matches blocked pattern '{pattern}'"
@@ -109,8 +126,8 @@ async def read_file_from_github(path: str) -> dict[str, Any]:
     return {"content": content, "sha": data["sha"]}
 
 
-def stage_file(path: str, content: str) -> str:
-    """Validate syntax and add a file to the staging area.
+def stage_file(path: str, content: str, agent_name: str = "_default") -> str:
+    """Validate syntax and add a file to the agent's staging area.
 
     Returns a success message or an error string.
     """
@@ -122,28 +139,31 @@ def stage_file(path: str, content: str) -> str:
     if syntax_err:
         return f"Error: {syntax_err}"
 
-    _staged_files[path.lstrip("/")] = content
+    staging = _get_staging(agent_name)
+    staging[path.lstrip("/")] = content
     return f"Staged: {path} ({len(content)} chars, {content.count(chr(10))+1} lines)"
 
 
-def get_staged_summary() -> str:
-    """Return a summary of all staged files."""
-    if not _staged_files:
+def get_staged_summary(agent_name: str = "_default") -> str:
+    """Return a summary of all staged files for an agent."""
+    staging = _get_staging(agent_name)
+    if not staging:
         return "No files staged."
-    lines = [f"Staged files ({len(_staged_files)}):"]
-    for path, content in _staged_files.items():
+    lines = [f"Staged files ({len(staging)}):"]
+    for path, content in staging.items():
         lines.append(f"  - {path} ({len(content)} chars)")
     return "\n".join(lines)
 
 
-def clear_staged() -> str:
-    """Clear the staging area."""
-    count = len(_staged_files)
-    _staged_files.clear()
+def clear_staged(agent_name: str = "_default") -> str:
+    """Clear the staging area for an agent."""
+    staging = _get_staging(agent_name)
+    count = len(staging)
+    staging.clear()
     return f"Cleared {count} staged file(s)."
 
 
-async def deploy_changes(commit_message: str, max_retries: int = 3) -> dict[str, Any]:
+async def deploy_changes(commit_message: str, agent_name: str = "_default", max_retries: int = 3) -> dict[str, Any]:
     """Commit all staged files atomically via GitHub Git Data API.
 
     Flow: create blobs -> create tree -> create commit -> update ref.
@@ -156,7 +176,8 @@ async def deploy_changes(commit_message: str, max_retries: int = 3) -> dict[str,
     if not settings.github_token:
         return {"error": "GITHUB_TOKEN not configured."}
 
-    if not _staged_files:
+    staging = _get_staging(agent_name)
+    if not staging:
         return {"error": "No files staged. Use edit_own_code first."}
 
     headers = _api_headers()
@@ -190,7 +211,7 @@ async def deploy_changes(commit_message: str, max_retries: int = 3) -> dict[str,
             # 3. Create blobs for each staged file
             tree_items = []
             blob_failed = False
-            for path, content in _staged_files.items():
+            for path, content in staging.items():
                 blob_url = f"{base}/git/blobs"
                 resp = await client.post(
                     blob_url,
@@ -258,8 +279,8 @@ async def deploy_changes(commit_message: str, max_retries: int = 3) -> dict[str,
                 continue
 
             # Success — clear staging area
-            deployed_files = list(_staged_files.keys())
-            _staged_files.clear()
+            deployed_files = list(staging.keys())
+            staging.clear()
 
             if attempt > 0:
                 logger.info(f"deploy_changes succeeded on retry {attempt}")

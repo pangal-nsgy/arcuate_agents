@@ -90,7 +90,7 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
         if not content:
             return "Error: 'content' is required — provide the complete new file content."
 
-        result = stage_file(path, content)
+        result = stage_file(path, content, agent_name=agent_name)
 
         log_activity(
             agent_name=agent_name,
@@ -100,7 +100,7 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
             output_summary=result,
         )
 
-        return f"{result}\n\n{get_staged_summary()}"
+        return f"{result}\n\n{get_staged_summary(agent_name=agent_name)}"
 
     elif name == "deploy_changes":
         from chief_of_staff.agent.activity import log_activity, CODE_DEPLOY
@@ -115,7 +115,7 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
         commit_msg = args["commit_message"]
 
         try:
-            result = await _deploy(commit_msg)
+            result = await _deploy(commit_msg, agent_name=agent_name)
         except Exception as e:
             log_activity(
                 agent_name=agent_name,

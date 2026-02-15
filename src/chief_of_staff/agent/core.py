@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 from typing import Any
@@ -82,10 +83,13 @@ class Agent:
         # Build system prompt from config (includes standing instructions + memory)
         system_prompt = self.config.build_system_prompt()
 
-        # Retrieve relevant context from knowledge base (graceful degradation)
+        # Retrieve relevant context from knowledge base (sync ChromaDB — run in thread)
         try:
             from chief_of_staff.knowledge.store import get_context_for_query
-            context = get_context_for_query(user_message)
+            loop = asyncio.get_event_loop()
+            context = await loop.run_in_executor(
+                None, functools.partial(get_context_for_query, user_message)
+            )
             if context:
                 system_prompt += f"\n\n--- RELEVANT CONTEXT FROM KNOWLEDGE BASE ---\n{context}\n--- END CONTEXT ---"
         except Exception as e:

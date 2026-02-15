@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Form, Response
+from fastapi import APIRouter, Form, Request, Response
+from twilio.request_validator import RequestValidator
 
 from chief_of_staff.agent.core import get_agent
 from chief_of_staff.agent.activity import log_activity, SMS_RECEIVED, SMS_SENT, ERROR
 from chief_of_staff.communication.sms import send_sms
+from chief_of_staff.config import settings
 from chief_of_staff.knowledge.database import get_recent_conversations, log_conversation
 
 logger = logging.getLogger(__name__)
@@ -24,11 +26,25 @@ def _strip_whatsapp_prefix(phone: str) -> str:
 
 @router.post("/sms")
 async def incoming_sms(
+    request: Request,
     From: str = Form(...),
     Body: str = Form(...),
     MessageSid: str = Form(""),
 ) -> Response:
     """Handle incoming SMS or WhatsApp message from Twilio."""
+    if settings.twilio_auth_token:
+        validator = RequestValidator(settings.twilio_auth_token)
+        form_data = dict(await request.form())
+        url = str(request.url).replace("http://", "https://")
+        signature = request.headers.get("X-Twilio-Signature", "")
+        if not validator.validate(url, form_data, signature):
+            logger.warning(f"Invalid Twilio signature from {From}")
+            return Response(
+                content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                media_type="text/xml",
+                status_code=403,
+            )
+
     raw_from = From
     clean_phone = _strip_whatsapp_prefix(From)
     is_whatsapp = raw_from.startswith("whatsapp:")
@@ -59,9 +75,8 @@ async def incoming_sms(
     recent = get_recent_conversations(clean_phone, limit=10)
     history = []
     for msg in reversed(recent):
-        history.append({"role": "user", "content": msg["message"]})
-        if msg.get("response"):
-            history.append({"role": "assistant", "content": msg["response"]})
+        role = "assistant" if msg.get("direction") == "outbound" else "user"
+        history.append({"role": role, "content": msg["message"]})
 
     # Get agent response
     try:

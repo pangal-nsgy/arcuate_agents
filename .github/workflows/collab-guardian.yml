@@ -1,29 +1,40 @@
 name: Collaboration Guardian
 
-# Triggers on push to dev branch — reviews code, then auto-merges to deploy if approved
+# Triggers on push to dev OR pull requests targeting dev
 on:
   push:
+    branches:
+      - dev
+  pull_request:
     branches:
       - dev
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   DEPLOY_BRANCH: claude/mcp-chrome-extension-BW3zj
 
 jobs:
-  review-and-merge:
+  # ── Gate: lint + test + build validation + AI review ──────────
+  validate:
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    outputs:
+      review_summary: ${{ steps.review.outputs.summary }}
+      review_issues: ${{ steps.review.outputs.issues }}
+      sha_short: ${{ steps.meta.outputs.sha_short }}
+      author: ${{ steps.meta.outputs.author }}
+      commit_msg: ${{ steps.meta.outputs.commit_msg }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0    # full history for merge-base diff + conflict resolution
+          fetch-depth: 0
           token: ${{ secrets.GH_PAT }}
 
       - name: Setup Python
@@ -41,10 +52,9 @@ jobs:
         id: meta
         run: |
           echo "author=${{ github.actor }}" >> "$GITHUB_OUTPUT"
-          echo "sha_short=$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          echo "sha_short=$(echo '${{ github.event.pull_request.head.sha || github.sha }}' | cut -c1-7)" >> "$GITHUB_OUTPUT"
           COMMIT_MSG=$(git log -1 --pretty=%s)
           echo "commit_msg=$COMMIT_MSG" >> "$GITHUB_OUTPUT"
-          # Diff against deploy branch for full picture
           MERGE_BASE=$(git merge-base "origin/$DEPLOY_BRANCH" HEAD 2>/dev/null || echo "HEAD~1")
           CHANGED=$(git diff --name-only "$MERGE_BASE" HEAD 2>/dev/null || echo "")
           echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
@@ -52,11 +62,11 @@ jobs:
           echo "EOF" >> "$GITHUB_OUTPUT"
           FILE_COUNT=$(echo "$CHANGED" | grep -c '.' || echo "0")
           echo "file_count=$FILE_COUNT" >> "$GITHUB_OUTPUT"
-          # Count commits since deploy branch
           COMMIT_COUNT=$(git rev-list --count "origin/$DEPLOY_BRANCH..HEAD" 2>/dev/null || echo "1")
           echo "commit_count=$COMMIT_COUNT" >> "$GITHUB_OUTPUT"
+          echo "is_pr=${{ github.event_name == 'pull_request' }}" >> "$GITHUB_OUTPUT"
 
-      # ── Notify Discord: push received ────────────────────────
+      # ── Notify Discord ────────────────────────────────────────
       - name: Discord — push received
         if: env.DISCORD_WEBHOOK_URL != ''
         run: |
@@ -68,9 +78,11 @@ jobs:
           if len(files) > 15:
               file_list += f"\n... and {len(files) - 15} more"
           commits = os.environ.get("COMMIT_COUNT", "1")
+          is_pr = os.environ.get("IS_PR", "false") == "true"
+          event_type = "PR" if is_pr else "Push"
           embed = {
-              "title": "Push to dev — reviewing...",
-              "description": f"**${{ steps.meta.outputs.author }}** pushed `${{ steps.meta.outputs.sha_short }}` ({commits} commit{'s' if commits != '1' else ''}) — ${{ steps.meta.outputs.commit_msg }}\n\nOpus 4.6 is reviewing this before merging to deploy.",
+              "title": f"{event_type} to dev — validating...",
+              "description": f"**${{ steps.meta.outputs.author }}** {'opened PR' if is_pr else 'pushed'} `${{ steps.meta.outputs.sha_short }}` — ${{ steps.meta.outputs.commit_msg }}\n\nRunning: linter → tests → build check → Opus 4.6 review",
               "color": 0x3498DB,
               "fields": [{"name": f"Files Changed ({os.environ.get('FILE_COUNT', '?')})", "value": file_list[:1024] or "none"}],
           }
@@ -81,6 +93,7 @@ jobs:
           CHANGED: ${{ steps.meta.outputs.changed_files }}
           FILE_COUNT: ${{ steps.meta.outputs.file_count }}
           COMMIT_COUNT: ${{ steps.meta.outputs.commit_count }}
+          IS_PR: ${{ steps.meta.outputs.is_pr }}
 
       # ── Step 1: Consistency linter ───────────────────────────
       - name: Run consistency linter
@@ -90,16 +103,136 @@ jobs:
       # ── Step 2: Run tests ──────────────────────────────────────
       - name: Run tests
         id: tests
-        run: PYTHONPATH=src pytest tests/ -v --tb=short 2>&1 | tail -50
+        run: PYTHONPATH=src pytest tests/ -v --tb=short 2>&1 | tail -80
 
-      # ── Step 3: AI code review (Opus 4.6) ────────────────────
+      # ── Step 3: Build validation (verify app starts) ────────────
+      - name: Build validation
+        id: build
+        run: |
+          echo "Validating app imports and startup..."
+          PYTHONPATH=src python3 -c "
+          import sys
+          print('[1/3] Importing main app module...')
+          from chief_of_staff.main import app
+          print(f'  OK — FastAPI app loaded: {len(app.routes)} routes')
+
+          print('[2/3] Importing agent system...')
+          from chief_of_staff.agent.core import run_agent_loop
+          from chief_of_staff.agent.tools import execute_tool
+          from chief_of_staff.agent.registry import load_agent_config
+          from chief_of_staff.agent.router import resolve_agent
+          print('  OK — agent core, tools, registry, router imported')
+
+          print('[3/3] Validating agent configs load...')
+          import os
+          os.environ.setdefault('AGENTS_DIR', 'agents')
+          for name in ['chief_of_staff', 'onboarding']:
+              try:
+                  cfg = load_agent_config(name)
+                  tools = cfg.get_resolved_tools()
+                  print(f'  OK — {name}: {len(tools)} tools loaded')
+              except Exception as e:
+                  print(f'  WARN — {name}: {e}')
+
+          print('Build validation PASSED')
+          "
+
+      # ── Step 4: AI code review (Opus 4.6) ────────────────────
       - name: AI code review
         id: review
         run: python3 scripts/ai_review.py
 
-      # ── Step 4: Auto-merge to deploy branch (with conflict resolution) ──
+      # ── Step 5: Staging health check (if staging URL configured) ──
+      - name: Staging health check
+        id: staging
+        if: env.STAGING_URL != ''
+        run: |
+          echo "Waiting 90s for staging deploy to propagate..."
+          sleep 90
+          echo "Checking staging health at $STAGING_URL/health..."
+          for i in 1 2 3 4 5; do
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$STAGING_URL/health" 2>/dev/null || echo "000")
+            if [ "$RESPONSE" = "200" ]; then
+              echo "Staging health check PASSED (attempt $i)"
+              BODY=$(curl -s "$STAGING_URL/health")
+              echo "  Response: $BODY"
+              echo "staging_healthy=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "  Attempt $i: HTTP $RESPONSE — retrying in 15s..."
+            sleep 15
+          done
+          echo "Staging health check FAILED after 5 attempts"
+          echo "staging_healthy=false" >> "$GITHUB_OUTPUT"
+          exit 1
+        env:
+          STAGING_URL: ${{ vars.STAGING_URL || '' }}
+
+      # ── Discord: validation result (for PRs) ──────────────────
+      - name: Discord — validation result (PR)
+        if: always() && github.event_name == 'pull_request' && env.DISCORD_WEBHOOK_URL != ''
+        run: |
+          python3 << 'PYEOF'
+          import httpx, os
+          webhook = os.environ["DISCORD_WEBHOOK_URL"]
+          lint_ok = os.environ.get("LINT_OUTCOME") == "success"
+          tests_ok = os.environ.get("TESTS_OUTCOME") == "success"
+          build_ok = os.environ.get("BUILD_OUTCOME") == "success"
+          review_ok = os.environ.get("REVIEW_OUTCOME") == "success"
+          all_ok = lint_ok and tests_ok and build_ok and review_ok
+
+          if all_ok:
+              color = 0x2ECC71
+              title = "PR Validated — Ready to Merge"
+              desc = f"All checks passed for PR by **${{ steps.meta.outputs.author }}**.\n\n**Review:** {os.environ.get('REVIEW_SUMMARY', '')}"
+          else:
+              color = 0xE74C3C
+              failed = []
+              if not lint_ok: failed.append("lint")
+              if not tests_ok: failed.append("tests")
+              if not build_ok: failed.append("build")
+              if not review_ok: failed.append("AI review")
+              title = f"PR BLOCKED — {', '.join(failed)} failed"
+              desc = f"Check the [Action logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+
+          embed = {"title": title, "description": desc[:4096], "color": color,
+                   "fields": [{"name": "Author", "value": "${{ steps.meta.outputs.author }}", "inline": True},
+                              {"name": "SHA", "value": "`${{ steps.meta.outputs.sha_short }}`", "inline": True}]}
+          resp = httpx.post(webhook, json={"embeds": [embed]})
+          print(f"Discord: {resp.status_code}")
+          PYEOF
+        env:
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+          REVIEW_SUMMARY: ${{ steps.review.outputs.summary }}
+
+  # ── Deploy: merge to deploy branch (only on push, not PR) ──────
+  deploy:
+    needs: validate
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml httpx
+
       - name: Merge dev → deploy
-        if: steps.lint.outcome == 'success' && steps.tests.outcome == 'success' && steps.review.outcome == 'success'
         id: merge
         run: |
           git config user.name "Collaboration Guardian"
@@ -107,20 +240,17 @@ jobs:
           git fetch origin "$DEPLOY_BRANCH"
           git checkout "$DEPLOY_BRANCH"
 
-          # Attempt merge
-          if git merge origin/dev --no-edit -m "guardian: merge dev (${{ steps.meta.outputs.sha_short }}) — AI approved"; then
+          if git merge origin/dev --no-edit -m "guardian: merge dev (${{ needs.validate.outputs.sha_short }}) — AI approved"; then
             echo "merge_clean=true" >> "$GITHUB_OUTPUT"
           else
             echo "Merge conflict detected — invoking AI conflict resolver..."
             echo "merge_clean=false" >> "$GITHUB_OUTPUT"
-
-            # Resolve conflicts with Opus 4.6
+            pip install httpx
             if python3 scripts/resolve_conflicts.py; then
-              git commit --no-edit -m "guardian: merge dev (${{ steps.meta.outputs.sha_short }}) — AI approved + conflicts resolved by Opus 4.6"
+              git commit --no-edit -m "guardian: merge dev (${{ needs.validate.outputs.sha_short }}) — AI approved + conflicts resolved by Opus 4.6"
               echo "conflicts_resolved=true" >> "$GITHUB_OUTPUT"
             else
               echo "conflicts_resolved=false" >> "$GITHUB_OUTPUT"
-              echo "[ERROR] AI conflict resolution failed. Aborting merge."
               git merge --abort
               exit 1
             fi
@@ -129,73 +259,44 @@ jobs:
           git push origin "$DEPLOY_BRANCH"
           echo "merged=true" >> "$GITHUB_OUTPUT"
 
-      # ── Discord: final status ────────────────────────────────
-      - name: Discord — result
+      # ── Discord: deploy result ────────────────────────────────
+      - name: Discord — deploy result
         if: always() && env.DISCORD_WEBHOOK_URL != ''
         run: |
           python3 << 'PYEOF'
           import httpx, os
           webhook = os.environ["DISCORD_WEBHOOK_URL"]
-
-          lint_ok = os.environ.get("LINT_OUTCOME") == "success"
-          tests_ok = os.environ.get("TESTS_OUTCOME") == "success"
-          review_ok = os.environ.get("REVIEW_OUTCOME") == "success"
           merged = os.environ.get("MERGED") == "true"
           merge_clean = os.environ.get("MERGE_CLEAN") == "true"
           conflicts_resolved = os.environ.get("CONFLICTS_RESOLVED") == "true"
           review_summary = os.environ.get("REVIEW_SUMMARY", "")
-          review_issues = os.environ.get("REVIEW_ISSUES", "")
 
           if merged:
-              color = 0x2ECC71  # green
+              color = 0x2ECC71
               if not merge_clean and conflicts_resolved:
                   title = "Approved, Conflicts Resolved & Deployed"
-                  desc = f"Opus 4.6 approved the code AND resolved merge conflicts automatically.\n\n**Review:** {review_summary}"
+                  desc = f"Opus 4.6 resolved merge conflicts automatically.\n\n**Review:** {review_summary}"
               else:
                   title = "Approved & Merged to Deploy"
-                  desc = f"Opus 4.6 approved. Merged to deploy branch — Railway will auto-deploy.\n\n**Review:** {review_summary}"
-          elif not lint_ok:
-              color = 0xE74C3C  # red
-              title = "BLOCKED — Lint Failed"
-              desc = "Consistency linter found errors. Push is NOT deployed.\nCheck the [Action logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
-          elif not tests_ok:
-              color = 0xE74C3C  # red
-              title = "BLOCKED — Tests Failed"
-              desc = "pytest found failing tests. Push is NOT deployed.\nCheck the [Action logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
-          elif not review_ok:
-              color = 0xE74C3C  # red
-              title = "BLOCKED — AI Review Rejected"
-              desc = f"Opus 4.6 found issues. Push is NOT deployed.\n\n**Review:** {review_summary}"
-              if review_issues:
-                  desc += f"\n\n**Issues:**\n{review_issues}"
+                  desc = f"All checks passed. Merged to deploy — Railway will auto-deploy.\n\n**Review:** {review_summary}"
           else:
-              color = 0xF1C40F  # yellow
-              title = "Review Passed but Merge Failed"
               conflict_note = ""
               if os.environ.get("CONFLICTS_RESOLVED") == "false":
                   conflict_note = " AI conflict resolution also failed."
-              desc = f"AI approved but the merge step failed.{conflict_note} Check the Action logs."
+              color = 0xF1C40F
+              title = "Validated but Merge Failed"
+              desc = f"All checks passed but merge step failed.{conflict_note}\nCheck [Action logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
 
-          embed = {
-              "title": title,
-              "description": desc[:4096],
-              "color": color,
-              "fields": [
-                  {"name": "Commit", "value": f"`{os.environ.get('SHA', '?')}`", "inline": True},
-                  {"name": "Author", "value": os.environ.get("AUTHOR", "?"), "inline": True},
-              ],
-          }
+          embed = {"title": title, "description": desc[:4096], "color": color,
+                   "fields": [{"name": "Commit", "value": f"`{os.environ.get('SHA', '?')}`", "inline": True},
+                              {"name": "Author", "value": os.environ.get("AUTHOR", "?"), "inline": True}]}
           resp = httpx.post(webhook, json={"embeds": [embed]})
           print(f"Discord: {resp.status_code}")
           PYEOF
         env:
-          LINT_OUTCOME: ${{ steps.lint.outcome }}
-          TESTS_OUTCOME: ${{ steps.tests.outcome }}
-          REVIEW_OUTCOME: ${{ steps.review.outcome }}
           MERGED: ${{ steps.merge.outputs.merged }}
           MERGE_CLEAN: ${{ steps.merge.outputs.merge_clean }}
           CONFLICTS_RESOLVED: ${{ steps.merge.outputs.conflicts_resolved }}
-          REVIEW_SUMMARY: ${{ steps.review.outputs.summary }}
-          REVIEW_ISSUES: ${{ steps.review.outputs.issues }}
-          SHA: ${{ steps.meta.outputs.sha_short }}
-          AUTHOR: ${{ steps.meta.outputs.author }}
+          REVIEW_SUMMARY: ${{ needs.validate.outputs.review_summary }}
+          SHA: ${{ needs.validate.outputs.sha_short }}
+          AUTHOR: ${{ needs.validate.outputs.author }}

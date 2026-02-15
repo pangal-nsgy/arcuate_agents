@@ -2,7 +2,8 @@
 """AI Code Reviewer — Opus 4.6 gatekeeper for the dev → deploy merge.
 
 Standalone script (no app imports). Runs in GitHub Actions.
-Reads the git diff, sends it to Claude Opus 4.6 for review,
+Diffs dev against the deploy branch (not just HEAD~1) so multi-commit
+pushes get fully reviewed. Sends diff to Claude Opus 4.6 for review,
 and outputs APPROVE or REJECT with reasoning.
 
 Usage:
@@ -12,7 +13,8 @@ Usage:
 
 Environment:
   ANTHROPIC_API_KEY  — required
-  REVIEW_DIFF        — optional, override diff (otherwise uses git diff HEAD~1)
+  DEPLOY_BRANCH      — deploy branch name (default: claude/mcp-chrome-extension-BW3zj)
+  REVIEW_DIFF        — optional, override diff (for testing)
 """
 
 from __future__ import annotations
@@ -36,29 +38,57 @@ def find_repo_root() -> Path:
 REPO_ROOT = find_repo_root()
 
 
+def get_deploy_branch() -> str:
+    """Get the deploy branch name from env or default."""
+    return os.environ.get("DEPLOY_BRANCH", "claude/mcp-chrome-extension-BW3zj")
+
+
+def get_merge_base() -> str:
+    """Find the merge base between HEAD and the deploy branch.
+
+    This ensures we review ALL commits since the last merge to deploy,
+    not just HEAD~1. Catches multi-commit pushes.
+    """
+    deploy = f"origin/{get_deploy_branch()}"
+    result = subprocess.run(
+        ["git", "merge-base", deploy, "HEAD"],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    # Fallback: if deploy branch doesn't exist yet, use HEAD~1
+    print(f"  [WARN] Could not find merge-base with {deploy}, falling back to HEAD~1")
+    return "HEAD~1"
+
+
 def get_diff() -> str:
-    """Get the git diff for the current push."""
+    """Get the full git diff between deploy branch and HEAD.
+
+    Uses merge-base so multi-commit pushes are fully reviewed.
+    """
     # Allow override for testing
     if os.environ.get("REVIEW_DIFF"):
         return os.environ["REVIEW_DIFF"]
 
+    base = get_merge_base()
     result = subprocess.run(
-        ["git", "diff", "HEAD~1", "HEAD"],
+        ["git", "diff", base, "HEAD"],
         capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     if result.returncode != 0:
-        # Fallback: diff against empty (first commit)
+        # Fallback: single commit diff
         result = subprocess.run(
-            ["git", "diff", "--cached", "HEAD"],
+            ["git", "diff", "HEAD~1", "HEAD"],
             capture_output=True, text=True, cwd=str(REPO_ROOT),
         )
     return result.stdout
 
 
 def get_changed_files() -> list[str]:
-    """Get list of files changed in the latest commit."""
+    """Get list of ALL files changed since the deploy branch diverged."""
+    base = get_merge_base()
     result = subprocess.run(
-        ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
+        ["git", "diff", "--name-only", base, "HEAD"],
         capture_output=True, text=True, cwd=str(REPO_ROOT),
     )
     return [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]

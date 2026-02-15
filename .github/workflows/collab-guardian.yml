@@ -23,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0    # full history for merge-base diff + conflict resolution
           token: ${{ secrets.GH_PAT }}
 
       - name: Setup Python
@@ -32,7 +32,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pyyaml httpx
+        run: |
+          pip install pyyaml httpx
+          pip install -e ".[dev]"
 
       # ── Gather metadata ──────────────────────────────────────
       - name: Get push metadata
@@ -42,12 +44,17 @@ jobs:
           echo "sha_short=$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_OUTPUT"
           COMMIT_MSG=$(git log -1 --pretty=%s)
           echo "commit_msg=$COMMIT_MSG" >> "$GITHUB_OUTPUT"
-          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          # Diff against deploy branch for full picture
+          MERGE_BASE=$(git merge-base "origin/$DEPLOY_BRANCH" HEAD 2>/dev/null || echo "HEAD~1")
+          CHANGED=$(git diff --name-only "$MERGE_BASE" HEAD 2>/dev/null || echo "")
           echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
           echo "$CHANGED" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
           FILE_COUNT=$(echo "$CHANGED" | grep -c '.' || echo "0")
           echo "file_count=$FILE_COUNT" >> "$GITHUB_OUTPUT"
+          # Count commits since deploy branch
+          COMMIT_COUNT=$(git rev-list --count "origin/$DEPLOY_BRANCH..HEAD" 2>/dev/null || echo "1")
+          echo "commit_count=$COMMIT_COUNT" >> "$GITHUB_OUTPUT"
 
       # ── Notify Discord: push received ────────────────────────
       - name: Discord — push received
@@ -60,9 +67,10 @@ jobs:
           file_list = "\n".join(f"- `{f}`" for f in files[:15] if f)
           if len(files) > 15:
               file_list += f"\n... and {len(files) - 15} more"
+          commits = os.environ.get("COMMIT_COUNT", "1")
           embed = {
               "title": "Push to dev — reviewing...",
-              "description": f"**${{ steps.meta.outputs.author }}** pushed `${{ steps.meta.outputs.sha_short }}` — ${{ steps.meta.outputs.commit_msg }}\n\nOpus 4.6 is reviewing this before merging to deploy.",
+              "description": f"**${{ steps.meta.outputs.author }}** pushed `${{ steps.meta.outputs.sha_short }}` ({commits} commit{'s' if commits != '1' else ''}) — ${{ steps.meta.outputs.commit_msg }}\n\nOpus 4.6 is reviewing this before merging to deploy.",
               "color": 0x3498DB,
               "fields": [{"name": f"Files Changed ({os.environ.get('FILE_COUNT', '?')})", "value": file_list[:1024] or "none"}],
           }
@@ -72,27 +80,52 @@ jobs:
         env:
           CHANGED: ${{ steps.meta.outputs.changed_files }}
           FILE_COUNT: ${{ steps.meta.outputs.file_count }}
+          COMMIT_COUNT: ${{ steps.meta.outputs.commit_count }}
 
       # ── Step 1: Consistency linter ───────────────────────────
       - name: Run consistency linter
         id: lint
         run: python3 scripts/lint_consistency.py --verbose
 
-      # ── Step 2: AI code review (Opus 4.6) ────────────────────
+      # ── Step 2: Run tests ──────────────────────────────────────
+      - name: Run tests
+        id: tests
+        run: PYTHONPATH=src pytest tests/ -v --tb=short 2>&1 | tail -50
+
+      # ── Step 3: AI code review (Opus 4.6) ────────────────────
       - name: AI code review
         id: review
         run: python3 scripts/ai_review.py
 
-      # ── Step 3: Auto-merge to deploy branch ──────────────────
+      # ── Step 4: Auto-merge to deploy branch (with conflict resolution) ──
       - name: Merge dev → deploy
-        if: steps.lint.outcome == 'success' && steps.review.outcome == 'success'
+        if: steps.lint.outcome == 'success' && steps.tests.outcome == 'success' && steps.review.outcome == 'success'
         id: merge
         run: |
           git config user.name "Collaboration Guardian"
           git config user.email "guardian@arcuatehealth.com"
           git fetch origin "$DEPLOY_BRANCH"
           git checkout "$DEPLOY_BRANCH"
-          git merge origin/dev --no-edit -m "guardian: merge dev (${{ steps.meta.outputs.sha_short }}) — AI approved"
+
+          # Attempt merge
+          if git merge origin/dev --no-edit -m "guardian: merge dev (${{ steps.meta.outputs.sha_short }}) — AI approved"; then
+            echo "merge_clean=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Merge conflict detected — invoking AI conflict resolver..."
+            echo "merge_clean=false" >> "$GITHUB_OUTPUT"
+
+            # Resolve conflicts with Opus 4.6
+            if python3 scripts/resolve_conflicts.py; then
+              git commit --no-edit -m "guardian: merge dev (${{ steps.meta.outputs.sha_short }}) — AI approved + conflicts resolved by Opus 4.6"
+              echo "conflicts_resolved=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "conflicts_resolved=false" >> "$GITHUB_OUTPUT"
+              echo "[ERROR] AI conflict resolution failed. Aborting merge."
+              git merge --abort
+              exit 1
+            fi
+          fi
+
           git push origin "$DEPLOY_BRANCH"
           echo "merged=true" >> "$GITHUB_OUTPUT"
 
@@ -105,19 +138,30 @@ jobs:
           webhook = os.environ["DISCORD_WEBHOOK_URL"]
 
           lint_ok = os.environ.get("LINT_OUTCOME") == "success"
+          tests_ok = os.environ.get("TESTS_OUTCOME") == "success"
           review_ok = os.environ.get("REVIEW_OUTCOME") == "success"
           merged = os.environ.get("MERGED") == "true"
+          merge_clean = os.environ.get("MERGE_CLEAN") == "true"
+          conflicts_resolved = os.environ.get("CONFLICTS_RESOLVED") == "true"
           review_summary = os.environ.get("REVIEW_SUMMARY", "")
           review_issues = os.environ.get("REVIEW_ISSUES", "")
 
           if merged:
               color = 0x2ECC71  # green
-              title = "Approved & Merged to Deploy"
-              desc = f"Opus 4.6 approved. Merged to deploy branch — Railway will auto-deploy.\n\n**Review:** {review_summary}"
+              if not merge_clean and conflicts_resolved:
+                  title = "Approved, Conflicts Resolved & Deployed"
+                  desc = f"Opus 4.6 approved the code AND resolved merge conflicts automatically.\n\n**Review:** {review_summary}"
+              else:
+                  title = "Approved & Merged to Deploy"
+                  desc = f"Opus 4.6 approved. Merged to deploy branch — Railway will auto-deploy.\n\n**Review:** {review_summary}"
           elif not lint_ok:
               color = 0xE74C3C  # red
               title = "BLOCKED — Lint Failed"
               desc = "Consistency linter found errors. Push is NOT deployed.\nCheck the [Action logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          elif not tests_ok:
+              color = 0xE74C3C  # red
+              title = "BLOCKED — Tests Failed"
+              desc = "pytest found failing tests. Push is NOT deployed.\nCheck the [Action logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
           elif not review_ok:
               color = 0xE74C3C  # red
               title = "BLOCKED — AI Review Rejected"
@@ -127,7 +171,10 @@ jobs:
           else:
               color = 0xF1C40F  # yellow
               title = "Review Passed but Merge Failed"
-              desc = "AI approved but the merge step failed. Check the Action logs."
+              conflict_note = ""
+              if os.environ.get("CONFLICTS_RESOLVED") == "false":
+                  conflict_note = " AI conflict resolution also failed."
+              desc = f"AI approved but the merge step failed.{conflict_note} Check the Action logs."
 
           embed = {
               "title": title,
@@ -143,8 +190,11 @@ jobs:
           PYEOF
         env:
           LINT_OUTCOME: ${{ steps.lint.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
           REVIEW_OUTCOME: ${{ steps.review.outcome }}
           MERGED: ${{ steps.merge.outputs.merged }}
+          MERGE_CLEAN: ${{ steps.merge.outputs.merge_clean }}
+          CONFLICTS_RESOLVED: ${{ steps.merge.outputs.conflicts_resolved }}
           REVIEW_SUMMARY: ${{ steps.review.outputs.summary }}
           REVIEW_ISSUES: ${{ steps.review.outputs.issues }}
           SHA: ${{ steps.meta.outputs.sha_short }}

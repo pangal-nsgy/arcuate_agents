@@ -145,7 +145,8 @@ arcuate_agents/
 │   └── collab-guardian.yml      # AI gatekeeper: linter → Opus review → merge → Discord
 │
 ├── scripts/                     # Setup and utility scripts
-│   ├── ai_review.py             # AI code reviewer (Opus 4.6, standalone, runs in CI)
+│   ├── ai_review.py             # AI code reviewer (Opus 4.6, standalone, diffs against deploy branch)
+│   ├── resolve_conflicts.py     # AI conflict resolver (Opus 4.6, auto-resolves merge conflicts)
 │   ├── lint_consistency.py      # Consistency linter (tools ↔ handlers, YAML, activity)
 │   ├── install-hooks.sh         # One-time git hook installer
 │   ├── setup_google_auth.py     # Run Google OAuth flow
@@ -418,10 +419,13 @@ PYTHONPATH=src uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8000
 git add <files>
 git commit -m "description"
 git push origin dev          # push to dev, NOT directly to deploy
-# → GitHub Action fires
+# → GitHub Action fires (full history checkout)
 # → Consistency linter runs
-# → Opus 4.6 reviews the diff
-# → If approved: auto-merges dev → deploy branch → Railway deploys
+# → pytest runs full test suite
+# → Opus 4.6 reviews the FULL diff (against deploy branch, catches multi-commit pushes)
+# → If approved: auto-merges dev → deploy branch
+#     → If merge conflicts: Opus 4.6 auto-resolves them
+# → Railway deploys
 # → If rejected: Discord notification with what's wrong, nothing deployed
 ```
 
@@ -483,10 +487,14 @@ AI-powered code review system. Nobody reviews code manually — Opus 4.6 does it
 
 ```
 Developer pushes to `dev` branch
-  → GitHub Action triggers
+  → GitHub Action triggers (full repo history for merge-base diff)
   → Step 1: Consistency linter (tools ↔ handlers, YAML, activity constants)
-  → Step 2: Opus 4.6 full code review (breaking changes, conflicts, security, async)
-  → APPROVED: auto-merges dev → deploy branch → Railway deploys
+  → Step 2: pytest (full test suite)
+  → Step 3: Opus 4.6 code review (diffs against deploy branch, not just HEAD~1)
+  → Step 4: Auto-merge dev → deploy branch
+     → If merge conflict: Opus 4.6 resolves conflicts automatically
+     → If resolution fails: merge aborted, Discord notification
+  → APPROVED: Railway auto-deploys
   → REJECTED: Discord notification with what's wrong, nothing deployed
 ```
 
@@ -494,9 +502,10 @@ Developer pushes to `dev` branch
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| AI reviewer | `scripts/ai_review.py` | Sends diff to Opus 4.6 for full code review |
+| AI reviewer | `scripts/ai_review.py` | Diffs against deploy branch (full push), sends to Opus 4.6 for review |
+| Conflict resolver | `scripts/resolve_conflicts.py` | Opus 4.6 auto-resolves merge conflicts file-by-file |
 | Consistency linter | `scripts/lint_consistency.py` | Checks tools ↔ handlers, activity constants ↔ stats, YAML validity |
-| GitHub Action | `.github/workflows/collab-guardian.yml` | Orchestrates: linter → AI review → merge → Discord |
+| GitHub Action | `.github/workflows/collab-guardian.yml` | Orchestrates: linter → pytest → AI review → merge (+ resolve) → Discord |
 | Pre-push hook | `.githooks/pre-push` | Local safety net: linter + syntax checks before push |
 | Hook installer | `scripts/install-hooks.sh` | One-time: `bash scripts/install-hooks.sh` |
 | code_ops retry | `src/chief_of_staff/agent/code_ops.py` | `deploy_changes` retries on 422 (non-fast-forward) |
@@ -515,8 +524,9 @@ Developer pushes to `dev` branch
 
 - **Blue**: Push received, Opus reviewing...
 - **Green**: Approved & merged to deploy — Railway will auto-deploy
-- **Red**: BLOCKED — lint failed or AI rejected (with details)
-- **Yellow**: AI approved but merge failed (check Action logs)
+- **Green** (variant): Approved, conflicts resolved by Opus 4.6 & deployed
+- **Red**: BLOCKED — lint failed, tests failed, or AI rejected (with details)
+- **Yellow**: AI approved but merge failed (even after conflict resolution attempt)
 
 ---
 

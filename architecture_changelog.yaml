@@ -13,6 +13,17 @@
 - date: "2026-02-15"
   author: dhiraj + claude
   category: deployment
+  title: "Guardian v2: full-diff review, pytest in CI, AI conflict resolution"
+  details: >
+    Upgraded Collaboration Guardian for async collaboration: AI review now diffs
+    against deploy branch (not just HEAD~1) catching multi-commit pushes. Added
+    pytest to CI pipeline. New AI conflict resolver (resolve_conflicts.py) uses
+    Opus 4.6 to auto-resolve merge conflicts. Fixed default branch to dev,
+    added branch protection on deploy, closed stale PR #1.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: deployment
   title: Collaboration Guardian pipeline verified end-to-end
   details: >
     Test commit to verify the full dev → AI review → deploy pipeline.

@@ -143,10 +143,13 @@ def clear_staged() -> str:
     return f"Cleared {count} staged file(s)."
 
 
-async def deploy_changes(commit_message: str) -> dict[str, Any]:
+async def deploy_changes(commit_message: str, max_retries: int = 3) -> dict[str, Any]:
     """Commit all staged files atomically via GitHub Git Data API.
 
     Flow: create blobs -> create tree -> create commit -> update ref.
+    Retries on 422 (non-fast-forward) — handles the race condition where a
+    developer pushes between reading the ref and updating it.
+
     Returns {"commit_sha": str, "files": list} on success,
     or {"error": str} on failure.
     """
@@ -158,84 +161,116 @@ async def deploy_changes(commit_message: str) -> dict[str, Any]:
 
     headers = _api_headers()
     base = _api_base()
+    last_error = ""
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        # 1. Get the current commit SHA for the branch
-        ref_url = f"{base}/git/ref/heads/{settings.github_branch}"
-        resp = await client.get(ref_url, headers=headers)
-        if resp.status_code != 200:
-            return {"error": f"Failed to get branch ref: {resp.status_code} {resp.text[:300]}"}
-        current_commit_sha = resp.json()["object"]["sha"]
+    for attempt in range(max_retries):
+        if attempt > 0:
+            backoff = attempt  # 1s, 2s
+            logger.info(f"deploy_changes retry {attempt}/{max_retries} after {backoff}s backoff")
+            import asyncio
+            await asyncio.sleep(backoff)
 
-        # 2. Get the tree SHA of the current commit
-        commit_url = f"{base}/git/commits/{current_commit_sha}"
-        resp = await client.get(commit_url, headers=headers)
-        if resp.status_code != 200:
-            return {"error": f"Failed to get commit: {resp.status_code} {resp.text[:300]}"}
-        base_tree_sha = resp.json()["tree"]["sha"]
+        async with httpx.AsyncClient(timeout=60) as client:
+            # 1. Get the current commit SHA for the branch
+            ref_url = f"{base}/git/ref/heads/{settings.github_branch}"
+            resp = await client.get(ref_url, headers=headers)
+            if resp.status_code != 200:
+                last_error = f"Failed to get branch ref: {resp.status_code} {resp.text[:300]}"
+                continue
+            current_commit_sha = resp.json()["object"]["sha"]
 
-        # 3. Create blobs for each staged file
-        tree_items = []
-        for path, content in _staged_files.items():
-            blob_url = f"{base}/git/blobs"
+            # 2. Get the tree SHA of the current commit
+            commit_url = f"{base}/git/commits/{current_commit_sha}"
+            resp = await client.get(commit_url, headers=headers)
+            if resp.status_code != 200:
+                last_error = f"Failed to get commit: {resp.status_code} {resp.text[:300]}"
+                continue
+            base_tree_sha = resp.json()["tree"]["sha"]
+
+            # 3. Create blobs for each staged file
+            tree_items = []
+            blob_failed = False
+            for path, content in _staged_files.items():
+                blob_url = f"{base}/git/blobs"
+                resp = await client.post(
+                    blob_url,
+                    headers=headers,
+                    json={"content": content, "encoding": "utf-8"},
+                )
+                if resp.status_code != 201:
+                    last_error = f"Failed to create blob for {path}: {resp.status_code} {resp.text[:300]}"
+                    blob_failed = True
+                    break
+                blob_sha = resp.json()["sha"]
+                tree_items.append({
+                    "path": path,
+                    "mode": "100644",
+                    "type": "blob",
+                    "sha": blob_sha,
+                })
+            if blob_failed:
+                continue
+
+            # 4. Create a new tree with the staged files
+            tree_url = f"{base}/git/trees"
             resp = await client.post(
-                blob_url,
+                tree_url,
                 headers=headers,
-                json={"content": content, "encoding": "utf-8"},
+                json={"base_tree": base_tree_sha, "tree": tree_items},
             )
             if resp.status_code != 201:
-                return {"error": f"Failed to create blob for {path}: {resp.status_code} {resp.text[:300]}"}
-            blob_sha = resp.json()["sha"]
-            tree_items.append({
-                "path": path,
-                "mode": "100644",
-                "type": "blob",
-                "sha": blob_sha,
-            })
+                last_error = f"Failed to create tree: {resp.status_code} {resp.text[:300]}"
+                continue
+            new_tree_sha = resp.json()["sha"]
 
-        # 4. Create a new tree with the staged files
-        tree_url = f"{base}/git/trees"
-        resp = await client.post(
-            tree_url,
-            headers=headers,
-            json={"base_tree": base_tree_sha, "tree": tree_items},
-        )
-        if resp.status_code != 201:
-            return {"error": f"Failed to create tree: {resp.status_code} {resp.text[:300]}"}
-        new_tree_sha = resp.json()["sha"]
+            # 5. Create a new commit
+            commit_create_url = f"{base}/git/commits"
+            resp = await client.post(
+                commit_create_url,
+                headers=headers,
+                json={
+                    "message": commit_message,
+                    "tree": new_tree_sha,
+                    "parents": [current_commit_sha],
+                },
+            )
+            if resp.status_code != 201:
+                last_error = f"Failed to create commit: {resp.status_code} {resp.text[:300]}"
+                continue
+            new_commit_sha = resp.json()["sha"]
 
-        # 5. Create a new commit
-        commit_create_url = f"{base}/git/commits"
-        resp = await client.post(
-            commit_create_url,
-            headers=headers,
-            json={
+            # 6. Update the branch ref to point to the new commit
+            resp = await client.patch(
+                ref_url,
+                headers=headers,
+                json={"sha": new_commit_sha},
+            )
+            if resp.status_code == 422:
+                # Non-fast-forward — another push landed between our read and update
+                logger.warning(
+                    f"deploy_changes: non-fast-forward on attempt {attempt + 1}, "
+                    f"retrying with latest ref"
+                )
+                last_error = "Non-fast-forward: branch was updated by another push"
+                continue
+            if resp.status_code != 200:
+                last_error = f"Failed to update ref: {resp.status_code} {resp.text[:300]}"
+                continue
+
+            # Success — clear staging area
+            deployed_files = list(_staged_files.keys())
+            _staged_files.clear()
+
+            if attempt > 0:
+                logger.info(f"deploy_changes succeeded on retry {attempt}")
+
+            logger.info(f"Deployed {len(deployed_files)} file(s) in commit {new_commit_sha[:8]}: {deployed_files}")
+
+            return {
+                "commit_sha": new_commit_sha,
+                "files": deployed_files,
                 "message": commit_message,
-                "tree": new_tree_sha,
-                "parents": [current_commit_sha],
-            },
-        )
-        if resp.status_code != 201:
-            return {"error": f"Failed to create commit: {resp.status_code} {resp.text[:300]}"}
-        new_commit_sha = resp.json()["sha"]
+            }
 
-        # 6. Update the branch ref to point to the new commit
-        resp = await client.patch(
-            ref_url,
-            headers=headers,
-            json={"sha": new_commit_sha},
-        )
-        if resp.status_code != 200:
-            return {"error": f"Failed to update ref: {resp.status_code} {resp.text[:300]}"}
-
-    # Success — clear staging area
-    deployed_files = list(_staged_files.keys())
-    _staged_files.clear()
-
-    logger.info(f"Deployed {len(deployed_files)} file(s) in commit {new_commit_sha[:8]}: {deployed_files}")
-
-    return {
-        "commit_sha": new_commit_sha,
-        "files": deployed_files,
-        "message": commit_message,
-    }
+    # All retries exhausted
+    return {"error": f"deploy_changes failed after {max_retries} attempts. Last error: {last_error}"}

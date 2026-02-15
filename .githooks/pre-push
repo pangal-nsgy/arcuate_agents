@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Pre-push hook — Collaboration Guardian
+#
+# Runs before every git push:
+#   1. Consistency linter (scripts/lint_consistency.py)
+#   2. Python syntax validation on changed .py files
+#   3. YAML syntax validation on changed .yaml files
+#
+# Install: bash scripts/install-hooks.sh
+# Bypass (emergency): git push --no-verify
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+echo "========================================"
+echo "Collaboration Guardian — Pre-push Check"
+echo "========================================"
+
+# Get the range of commits being pushed
+# $1=remote, $2=url — read lines of: <local ref> <local sha> <remote ref> <remote sha>
+ERRORS=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+        # Deleting a remote ref, skip
+        continue
+    fi
+
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        # New branch — check all files
+        CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR HEAD)
+    else
+        CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR "$remote_sha..$local_sha")
+    fi
+
+    # --- Step 1: Consistency linter ---
+    echo ""
+    echo "[1/3] Running consistency linter..."
+    if python3 "$REPO_ROOT/scripts/lint_consistency.py"; then
+        echo "  Linter: PASSED"
+    else
+        echo "  Linter: FAILED"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # --- Step 2: Python syntax check on changed files ---
+    echo ""
+    echo "[2/3] Checking Python syntax..."
+    PY_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' || true)
+    if [ -n "$PY_FILES" ]; then
+        while IFS= read -r pyfile; do
+            if [ -f "$REPO_ROOT/$pyfile" ]; then
+                if python3 -c "
+import ast, sys
+try:
+    ast.parse(open('$REPO_ROOT/$pyfile').read(), filename='$pyfile')
+except SyntaxError as e:
+    print(f'  [FAIL] {e.filename} line {e.lineno}: {e.msg}')
+    sys.exit(1)
+"; then
+                    : # pass
+                else
+                    ERRORS=$((ERRORS + 1))
+                fi
+            fi
+        done <<< "$PY_FILES"
+        if [ "$ERRORS" -eq 0 ]; then
+            echo "  Python syntax: PASSED"
+        fi
+    else
+        echo "  No Python files changed"
+    fi
+
+    # --- Step 3: YAML syntax check on changed files ---
+    echo ""
+    echo "[3/3] Checking YAML syntax..."
+    YAML_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(yaml|yml)$' || true)
+    if [ -n "$YAML_FILES" ]; then
+        while IFS= read -r yamlfile; do
+            if [ -f "$REPO_ROOT/$yamlfile" ]; then
+                if python3 -c "
+import yaml, sys
+try:
+    yaml.safe_load(open('$REPO_ROOT/$yamlfile'))
+except yaml.YAMLError as e:
+    print(f'  [FAIL] $yamlfile: {e}')
+    sys.exit(1)
+"; then
+                    : # pass
+                else
+                    ERRORS=$((ERRORS + 1))
+                fi
+            fi
+        done <<< "$YAML_FILES"
+        if [ "$ERRORS" -eq 0 ]; then
+            echo "  YAML syntax: PASSED"
+        fi
+    else
+        echo "  No YAML files changed"
+    fi
+
+done
+
+echo ""
+echo "========================================"
+if [ "$ERRORS" -gt 0 ]; then
+    echo "BLOCKED: $ERRORS error(s) found. Fix and try again."
+    echo "Emergency bypass: git push --no-verify"
+    exit 1
+else
+    echo "All pre-push checks passed."
+    exit 0
+fi

@@ -13,6 +13,17 @@
 - date: "2026-02-15"
   author: dhiraj + claude
   category: security
+  title: Collaboration Guardian — conflict detection, auto-resolution, linting
+  details: >
+    Multi-developer collaboration system: consistency linter (tools/activity/YAML),
+    pre-push git hook, GitHub Action with Discord notifications (#agent-building),
+    AI-powered merge conflict detection (Opus 4.6), code_ops retry logic for
+    race conditions. Files: lint_consistency.py, merge_resolver.py,
+    collab-guardian.yml, .githooks/pre-push, install-hooks.sh.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: security
   title: Production hardening — async, retry, timeouts, error handling
   details: >
     Switched to AsyncAnthropic, added retry logic (retry.py), 3-level timeouts

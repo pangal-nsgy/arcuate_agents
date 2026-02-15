@@ -211,6 +211,7 @@ def get_activity_stats(hours: int = 24) -> dict[str, Any]:
         "web_searches": by_type.get(WEB_SEARCH, 0),
         "config_updates": by_type.get(CONFIG_UPDATE, 0),
         "memory_writes": by_type.get(MEMORY_WRITE, 0),
+        "memory_reads": by_type.get(MEMORY_READ, 0),
         "sub_agents_spawned": by_type.get(SUB_AGENT_SPAWN, 0),
         "delegations": by_type.get(DELEGATION, 0),
         "errors": by_type.get(ERROR, 0),

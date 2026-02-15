@@ -1,148 +1,120 @@
-# Arcuate Chief of Staff Agent — Architecture
+# Arcuate Agentic Workforce — Architecture
 
 ## Overview
 
-The Chief of Staff is an always-on AI agent that serves as the central nervous system
-for Arcuate Health. It ingests all company information (emails, docs, call transcripts,
-meeting recordings) into a unified knowledge base and can act on behalf of the founders
-(draft documents, send messages, execute tasks).
+The Arcuate Workforce is a multi-agent system that serves as the operating layer for Arcuate Health. The Chief of Staff (COS) orchestrates specialist agents, each with focused skills. All agents share a unified knowledge base, and the Discord bot routes messages to the right agent automatically.
 
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   FOUNDER INTERFACES                     │
-│  SMS/Text (Twilio)  │  Voice (11Labs+Twilio)  │  Web UI │
-└──────────┬──────────┴────────────┬─────────────┴────────┘
-           │                       │
-           ▼                       ▼
-┌─────────────────────────────────────────────────────────┐
-│                     AGENT CORE                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐ │
-│  │  Claude API   │  │  Task Planner │  │  Tool Router  │ │
-│  │  (Reasoning)  │  │  (Actions)    │  │  (Execution)  │ │
-│  └──────────────┘  └──────────────┘  └───────────────┘ │
-└──────────┬──────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                   FOUNDER INTERFACES                         │
+│  Discord Bot  │  SMS (Twilio)  │  Voice (11Labs)  │  Web UI │
+└───────────────┬──────────────┬─────────────────────┴────────┘
+                │              │
+                ▼              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ROUTER (router.py)                                         │
+│  1. @discord_name mention → specialist                      │
+│  2. Trigger word match → specialist                         │
+│  3. Default → Chief of Staff                                │
+└───────────────┬──────────────┬──────────────────────────────┘
+                │              │
+    ┌───────────▼───┐    ┌────▼────────────────┐
+    │  Chief of     │    │  Onboarding         │    (future agents)
+    │  Staff        │    │  Specialist         │
+    │  @angie       │    │  @onboarding        │
+    │               │    │                     │
+    │  Skills:      │    │  Skills:            │
+    │  knowledge    │    │  knowledge          │
+    │  memory       │    │  communication      │
+    │  delegation   │    │  memory             │
+    │  self_mod     │    │                     │
+    │  code_ops     │    │  8 tools            │
+    │               │    │                     │
+    │  13 tools     │    └─────────────────────┘
+    └───────┬───────┘
+            │ delegate_task
+            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  SKILL MODULES (src/chief_of_staff/agent/skills/)           │
+│  ┌──────────┐ ┌──────────────┐ ┌──────────┐ ┌───────────┐ │
+│  │knowledge │ │communication │ │ meetings │ │ self_mod  │ │
+│  │ 3 tools  │ │   3 tools    │ │  1 tool  │ │  3 tools  │ │
+│  └──────────┘ └──────────────┘ └──────────┘ └───────────┘ │
+│  ┌──────────┐ ┌──────────────┐ ┌──────────────────────────┐│
+│  │ memory   │ │  delegation  │ │      code_ops            ││
+│  │ 2 tools  │ │   2 tools    │ │       3 tools            ││
+│  └──────────┘ └──────────────┘ └──────────────────────────┘│
+└──────────┬──────────────────────────────────────────────────┘
            │
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   KNOWLEDGE STORE                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐ │
-│  │  Vector DB    │  │  SQLite/PG   │  │  File Store   │ │
-│  │  (Semantic)   │  │  (Metadata)  │  │  (Raw Docs)   │ │
-│  └──────────────┘  └──────────────┘  └───────────────┘ │
-└──────────┬──────────────────────────────────────────────┘
+┌──────────▼──────────────────────────────────────────────────┐
+│  KNOWLEDGE STORE (src/chief_of_staff/knowledge/)            │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐     │
+│  │  ChromaDB    │  │  SQLite      │  │  File Store   │     │
+│  │  (Semantic)  │  │  (Metadata)  │  │  (Raw Docs)   │     │
+│  └──────────────┘  └──────────────┘  └───────────────┘     │
+└──────────┬──────────────────────────────────────────────────┘
            │
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                 INGESTION LAYER                           │
-│  ┌──────────┐ ┌────────┐ ┌──────────┐ ┌──────────────┐ │
-│  │  Gmail    │ │ Google │ │ 11Labs   │ │ Zoom/Meeting │ │
-│  │  Sync    │ │  Docs  │ │Transcripts│ │  Recorder    │ │
-│  └──────────┘ └────────┘ └──────────┘ └──────────────┘ │
-└─────────────────────────────────────────────────────────┘
+┌──────────▼──────────────────────────────────────────────────┐
+│  INGESTION LAYER (src/chief_of_staff/ingestion/)            │
+│  ┌──────────┐ ┌────────┐ ┌──────────┐ ┌──────────────────┐ │
+│  │  Gmail   │ │ Google │ │ 11Labs   │ │ Zoom/Meeting     │ │
+│  │  Sync    │ │  Docs  │ │Transcripts││  Recorder        │ │
+│  └──────────┘ └────────┘ └──────────┘ └──────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Components
+## Agent Workforce
 
-### 1. Ingestion Layer
-- **Gmail Connector**: Watches a dedicated email (e.g., chief@arcuate.health) via Gmail API.
-  All founder emails get auto-forwarded here. Polls or uses push notifications.
-- **Google Docs Connector**: Syncs shared Drive/Docs via Google Drive API.
-  Indexes document content for retrieval.
-- **ElevenLabs Transcript Puller**: Pulls conversation transcripts from 11Labs API.
-  Tags by client, date, agent.
-- **Meeting Recorder**: Zoom bot (via Recall.ai or similar) that joins internal calls,
-  records, and transcribes.
+| Agent | Discord Name | Skills | Effective Tools | Role |
+|-------|-------------|--------|----------------|------|
+| Chief of Staff | @angie | knowledge, memory, delegation, self_mod, code_ops | 13 + web_search | Orchestrator: delegates to specialists, handles strategy, system config, code changes |
+| Onboarding Specialist | @onboarding | knowledge, communication, memory | 8 | New practice onboarding: welcome packets, checklists, emails, follow-ups |
 
-### 2. Knowledge Store
-- **Vector Database** (ChromaDB or Pinecone): Stores embeddings of all ingested content
-  for semantic search. Chunked and tagged with source metadata.
-- **Structured Database** (SQLite for now, Postgres later): Client records, contact info,
-  task logs, conversation histories, document metadata.
-- **File Store**: Raw documents, attachments, recordings stored on disk or S3.
+## Skill System
 
-### 3. Agent Core
-- **Claude API**: Primary reasoning engine. All queries go through Claude with
-  retrieved context from the knowledge store.
-- **Task Planner**: Breaks down complex requests into steps. E.g., "create onboarding
-  packet" → retrieve old packet → retrieve client emails → draft new packet.
-- **Tool Router**: Executes actions — send email, send SMS, create doc, update DB.
+Skills are reusable tool modules. Each agent loads skills by name in their YAML config. The `SkillRegistry` resolves skill names into tool definitions at runtime.
 
-### 4. Communication Layer
-- **Twilio SMS**: Two-way SMS with founders. Text the agent, get answers.
-- **Twilio Voice + ElevenLabs**: Call the agent or have it call you.
-- **Email (Gmail API)**: Send emails on behalf of the team.
+| Skill | Tools | Description |
+|-------|-------|-------------|
+| `knowledge` | search_knowledge, list_recent_emails, search_meetings | Search company knowledge base |
+| `communication` | send_sms, send_email, draft_document | External communications |
+| `meetings` | send_meeting_bot | Meeting recording bots |
+| `self_mod` | update_own_instructions, update_system_prompt, update_triage_config | Self-modification |
+| `memory` | remember, recall_memory | Persistent memory |
+| `delegation` | create_sub_agent, delegate_task | Agent orchestration |
+| `code_ops` | read_own_code, edit_own_code, deploy_changes | Code self-modification via GitHub |
 
-### 5. Founder Interfaces
-- **SMS/Text**: Primary interface. Text questions, get answers with full context.
-- **Voice**: Call in for complex discussions.
-- **Web Dashboard** (future): View knowledge base, task history, agent activity.
+## Message Flow
+
+1. User sends Discord message
+2. Bot checks: DM / @mention → always respond; otherwise → triage (merged trigger words + LLM)
+3. Router resolves which agent handles: @discord_name → specialist; trigger word → specialist; default → COS
+4. Agent loads its skills, builds system prompt + memory + KB context
+5. Agentic loop: Claude API → tool calls → results → repeat until text response
+6. Response sent to Discord, activity logged with resolved agent_name
 
 ## Tech Stack
-- **Language**: Python 3.11+
+
+- **Language**: Python 3.12
 - **Framework**: FastAPI (webhook server + API)
-- **LLM**: Anthropic Claude API (claude-sonnet-4-5-20250929)
+- **LLM**: Anthropic Claude (Sonnet 4.5 for agents, Haiku 4.5 for triage)
 - **Vector DB**: ChromaDB (local, upgradeable to Pinecone)
-- **Database**: SQLite (local, upgradeable to PostgreSQL)
-- **Task Queue**: Python asyncio + optional Celery for background jobs
-- **Integrations**: Google APIs, Twilio, ElevenLabs, Zoom/Recall.ai
+- **Database**: SQLite (local, Railway persistent volume)
+- **Deployment**: Railway (auto-deploy from GitHub push)
+- **Integrations**: Google APIs, Twilio, ElevenLabs, Discord, Zoom/Recall.ai
 
-## Data Flow Example: "Create onboarding packet for new client"
+## Adding a New Agent
 
-1. Founder texts: "Create an onboarding packet for Dr. Smith's practice"
-2. Twilio webhook → FastAPI → Agent Core
-3. Agent reasons: needs old onboarding template + client context
-4. Retrieves from Knowledge Store:
-   - Old onboarding packet (Google Docs, via vector search)
-   - Email chain with Dr. Smith (Gmail ingestion)
-   - Call transcripts with Dr. Smith (11Labs)
-   - Email chain with first client for reference (Gmail)
-5. Claude synthesizes all context → generates new onboarding packet
-6. Agent responds via SMS with summary + link to generated doc
-7. Optionally emails the packet to Dr. Smith directly
+1. Create `agents/<name>.yaml` — define name, discord_name, skills, system_prompt, permissions
+2. Create `agent_memory/<name>.md` (empty)
+3. The registry auto-discovers it. Router picks it up for discord_name and trigger_words.
+4. No code changes needed.
 
-## Directory Structure
-```
-arcuate_agents/
-├── ARCHITECTURE.md
-├── README.md
-├── pyproject.toml
-├── .env.example
-├── src/
-│   └── chief_of_staff/
-│       ├── __init__.py
-│       ├── main.py              # FastAPI app entry point
-│       ├── config.py            # Settings & env vars
-│       ├── agent/
-│       │   ├── __init__.py
-│       │   ├── core.py          # Main agent reasoning loop
-│       │   ├── planner.py       # Task decomposition
-│       │   └── tools.py         # Available tools/actions
-│       ├── ingestion/
-│       │   ├── __init__.py
-│       │   ├── gmail.py         # Gmail API connector
-│       │   ├── gdocs.py         # Google Docs/Drive connector
-│       │   ├── elevenlabs.py    # 11Labs transcript puller
-│       │   └── meetings.py      # Zoom/meeting recorder
-│       ├── knowledge/
-│       │   ├── __init__.py
-│       │   ├── store.py         # Knowledge store interface
-│       │   ├── vectordb.py      # ChromaDB operations
-│       │   ├── database.py      # SQLite operations
-│       │   └── embeddings.py    # Embedding generation
-│       ├── communication/
-│       │   ├── __init__.py
-│       │   ├── sms.py           # Twilio SMS
-│       │   ├── voice.py         # Twilio + 11Labs voice
-│       │   └── email.py         # Gmail send
-│       └── webhooks/
-│           ├── __init__.py
-│           ├── twilio.py        # Incoming SMS/voice webhooks
-│           └── gmail.py         # Gmail push notifications
-├── tests/
-│   └── ...
-└── scripts/
-    ├── ingest_initial.py        # One-time historical ingestion
-    └── setup_google_auth.py     # Google OAuth setup helper
-```
+## Adding a New Skill
+
+1. Create `src/chief_of_staff/agent/skills/<name>.py`
+2. Export: `SKILL_NAME`, `TOOL_DEFINITIONS`, `async execute()`
+3. Add module name to `_SKILL_MODULES` in `skills/__init__.py`
+4. Add to agents' `skills:` list in YAML

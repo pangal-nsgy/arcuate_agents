@@ -1,4 +1,4 @@
-"""Discord bot interface — founders message the Chief of Staff via Discord."""
+"""Discord bot interface — routes messages to the right agent."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ _DEFAULT_TRIGGER_WORDS = {"angie", "agent1", "agent 1", "chief of staff", "cos,"
 
 
 class ChiefOfStaffBot(discord.Client):
-    """Discord bot that connects to the Claude-powered Chief of Staff agent."""
+    """Discord bot that routes messages to the appropriate agent."""
 
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -35,14 +35,22 @@ class ChiefOfStaffBot(discord.Client):
         intents.messages = True
         intents.guilds = True
         super().__init__(intents=intents)
-        self._agent = None
+        self._agents: dict[str, Any] = {}  # agent_name -> Agent instance (cache)
         self._triage_client = None
 
-    def _get_agent(self):
-        if self._agent is None:
-            from chief_of_staff.agent.core import get_agent
-            self._agent = get_agent()
-        return self._agent
+    def _get_agent(self, name: str = "chief_of_staff"):
+        """Get a cached agent by name. Falls back to COS if not found."""
+        if name not in self._agents:
+            from chief_of_staff.agent.core import get_agent, get_agent_by_name
+            if name == "chief_of_staff":
+                self._agents[name] = get_agent()
+            else:
+                agent = get_agent_by_name(name)
+                if agent is None:
+                    logger.warning(f"Agent '{name}' not found, falling back to chief_of_staff")
+                    return self._get_agent("chief_of_staff")
+                self._agents[name] = agent
+        return self._agents[name]
 
     def _get_triage_client(self):
         if self._triage_client is None:
@@ -60,16 +68,18 @@ class ChiefOfStaffBot(discord.Client):
             logger.info(f"  Server: {guild.name} — channels: {channels}")
 
     def _get_triage_config(self) -> tuple[set[str], str]:
-        """Load trigger words and triage prompt from agent config (live from YAML)."""
+        """Load merged trigger words from all agents, and triage prompt from COS."""
+        from chief_of_staff.agent.router import get_all_trigger_words
         from chief_of_staff.agent.registry import get_registry
-        registry = get_registry()
-        config = registry.get("chief_of_staff")
 
-        if config and config.trigger_words:
-            trigger_words = set(w.lower() for w in config.trigger_words)
-        else:
+        # Merged trigger words from ALL agents
+        trigger_words = get_all_trigger_words()
+        if not trigger_words:
             trigger_words = _DEFAULT_TRIGGER_WORDS
 
+        # Triage prompt from COS config
+        registry = get_registry()
+        config = registry.get("chief_of_staff")
         if config and config.triage_prompt:
             triage_prompt = config.triage_prompt
         else:
@@ -154,12 +164,16 @@ class ChiefOfStaffBot(discord.Client):
         if not should_respond:
             return
 
-        logger.info(f"Discord message from {message.author} in #{channel_name}: {content[:100]}...")
+        # Route to the right agent
+        from chief_of_staff.agent.router import resolve_agent
+        agent_name = resolve_agent(content, is_dm=is_dm)
+
+        logger.info(f"Discord message from {message.author} in #{channel_name} → {agent_name}: {content[:100]}...")
 
         # Log incoming message
         from chief_of_staff.agent.activity import log_activity, MESSAGE_RECEIVED, MESSAGE_SENT, ERROR
         log_activity(
-            agent_name="chief_of_staff",
+            agent_name=agent_name,
             action_type=MESSAGE_RECEIVED,
             action_detail=content[:500],
             channel="discord",
@@ -170,7 +184,7 @@ class ChiefOfStaffBot(discord.Client):
         # Show typing indicator while processing
         async with message.channel.typing():
             try:
-                agent = self._get_agent()
+                agent = self._get_agent(agent_name)
                 # Build conversation history from recent channel messages
                 history = await self._build_history(message.channel)
 
@@ -183,7 +197,7 @@ class ChiefOfStaffBot(discord.Client):
 
                 # Log outgoing response
                 log_activity(
-                    agent_name="chief_of_staff",
+                    agent_name=agent_name,
                     action_type=MESSAGE_SENT,
                     action_detail=response[:500],
                     channel="discord",
@@ -205,7 +219,7 @@ class ChiefOfStaffBot(discord.Client):
             except Exception as e:
                 logger.error(f"Error processing Discord message: {e}", exc_info=True)
                 log_activity(
-                    agent_name="chief_of_staff",
+                    agent_name=agent_name,
                     action_type=ERROR,
                     action_detail=f"Discord message processing failed: {e}",
                     channel="discord",

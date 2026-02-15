@@ -97,7 +97,7 @@ class Agent:
         messages.append({"role": "user", "content": user_message})
 
         # Get tool definitions for this agent's allowed tools
-        tool_defs = get_tool_definitions(self.config.tools)
+        tool_defs = get_tool_definitions(self.config.get_resolved_tools())
         server_tools = get_server_tools(self.config.server_tools)
 
         # Agentic loop
@@ -197,22 +197,31 @@ class ChiefOfStaff(Agent):
         super().__init__(config)
 
 
-# Singleton
-_agent: ChiefOfStaff | None = None
+# Unified agent cache
+_agents: dict[str, Agent] = {}
 
 
 def get_agent() -> ChiefOfStaff:
     """Get the singleton Chief of Staff agent."""
-    global _agent
-    if _agent is None:
-        _agent = ChiefOfStaff()
-    return _agent
+    if "chief_of_staff" not in _agents:
+        _agents["chief_of_staff"] = ChiefOfStaff()
+    agent = _agents["chief_of_staff"]
+    assert isinstance(agent, ChiefOfStaff)
+    return agent
 
 
-def get_sub_agent(name: str) -> Agent | None:
-    """Get a sub-agent by name."""
+def get_agent_by_name(name: str) -> Agent | None:
+    """Get a cached agent by name. Creates it if the config exists."""
+    if name in _agents:
+        return _agents[name]
     registry = get_registry()
     config = registry.get(name)
     if config:
-        return Agent(config)
+        agent = Agent(config)
+        _agents[name] = agent
+        return agent
     return None
+
+
+# Backward-compatible alias
+get_sub_agent = get_agent_by_name

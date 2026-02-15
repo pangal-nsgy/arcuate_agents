@@ -60,31 +60,40 @@ Multiple developers (and their AI agents) can work on this repo simultaneously:
 
 ## Features
 
+- **Multi-agent workforce** — COS orchestrator + specialist agents (Onboarding Specialist), with skill-based tool loading
+- **7 reusable skill modules, 17 tools** — knowledge, communication, meetings, self-mod, memory, delegation, code ops
 - **Full company knowledge base** — 500+ emails, Google Docs, ElevenLabs call transcripts, meeting notes in ChromaDB + SQLite
-- **Discord interface** — chat with the agent in Discord DMs, @mentions, or dedicated channels
+- **Discord interface** — single bot, multi-agent routing via @mention, trigger words, or COS default
 - **Email** — sends and reads email as agent1@arcuatehealth.com via Gmail API
-- **17 tools** — knowledge search, email, SMS, document drafting, meeting bots, web search
 - **Self-modification** — agent can update its own instructions, system prompt, and Discord triage behavior
 - **Code self-modification** — agent can read, edit, and deploy its own source code via GitHub API, triggering Railway auto-deploy
-- **Persistent memory** — remembers key facts, preferences, and patterns across conversations
-- **Sub-agent system** — create and delegate to specialized sub-agents, persist them via code ops
+- **Persistent memory** — per-agent memory, persists key facts and patterns across conversations
 - **Activity dashboard** — live web dashboard with Activity tab (22 action types) and System tab (architecture changelog, tool registry)
 - **Background ingestion** — syncs emails, docs, and call transcripts every 5 minutes
 - **Production hardened** — async throughout, retry with backoff, timeouts at every level, structured error handling
+
+## Agent Workforce
+
+| Agent | Discord Name | Skills | Role |
+|-------|-------------|--------|------|
+| Chief of Staff | @angie | knowledge, memory, delegation, self_mod, code_ops | Orchestrator — delegates to specialists |
+| Onboarding Specialist | @onboarding | knowledge, communication, memory | New practice onboarding |
 
 ## Architecture
 
 ```
 src/chief_of_staff/
-  agent/          # Agent loop, 17 tools, retry, activity tracking (22 types), code ops, memory
-  dashboard/      # Web dashboard — Activity tab + System tab (architecture changelog)
-  communication/  # Discord bot, SMS (Twilio), email (Gmail API), error reporter
+  agent/          # Agent loop, router, skill modules, activity tracking, code ops
+    skills/       # 7 reusable skill modules (17 tools total)
+    router.py     # Multi-agent message routing
+  dashboard/      # Web dashboard — Activity tab + System tab
+  communication/  # Discord bot (multi-agent), SMS, email, error reporter
   ingestion/      # Gmail, Google Docs, ElevenLabs, Zoom, background scheduler
   knowledge/      # ChromaDB vector search + SQLite metadata
   webhooks/       # Twilio, Gmail push, Zoom, Recall.ai
 agents/           # YAML agent configs (self-modifiable at runtime)
 agent_memory/     # Persistent per-agent memory files
-tests/            # Test suite (16 tests)
+tests/            # Test suite (63 tests)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the full architecture reference.

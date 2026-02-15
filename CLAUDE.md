@@ -38,15 +38,30 @@ PYTHONPATH=src uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8000
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
+│  ROUTER (src/chief_of_staff/agent/router.py)                │
+│  resolve_agent()  — @mention / trigger word / default COS   │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────┐
 │  AGENT CORE (src/chief_of_staff/agent/)                     │
 │  core.py      — Async agentic loop (Claude API + tools)     │
-│  tools.py     — 17 tool definitions + execute_tool()        │
+│  tools.py     — Facade → delegates to skill modules         │
 │  registry.py  — YAML config loader (agents/*.yaml)          │
+│  router.py    — Multi-agent message routing                 │
 │  memory.py    — Per-agent persistent memory (.md files)      │
 │  activity.py  — Activity tracking (22 types → SQLite)       │
 │  retry.py     — Exponential backoff for transient failures   │
-│  planner.py   — Multi-step task decomposition               │
 │  code_ops.py  — Code self-modification via GitHub REST API   │
+│                                                              │
+│  skills/      — Modular tool collections (7 skill modules)  │
+│    knowledge.py      — search_knowledge, list_recent_emails, │
+│                        search_meetings                       │
+│    communication.py  — send_sms, send_email, draft_document  │
+│    meetings.py       — send_meeting_bot                      │
+│    self_mod.py       — update_own_instructions, etc.         │
+│    memory_skill.py   — remember, recall_memory               │
+│    delegation.py     — create_sub_agent, delegate_task       │
+│    code_ops_skill.py — read_own_code, edit_own_code, deploy  │
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
@@ -66,8 +81,15 @@ PYTHONPATH=src uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8000
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Agent Workforce**:
+
+| Agent | Discord Name | Skills | Role |
+|-------|-------------|--------|------|
+| Chief of Staff | @angie | knowledge, memory, delegation, self_mod, code_ops | Orchestrator — delegates to specialists, handles strategy + system config |
+| Onboarding Specialist | @onboarding | knowledge, communication, memory | New practice onboarding — welcome packets, checklists, follow-ups |
+
 **Supporting modules**:
-- `src/chief_of_staff/communication/` — Discord bot, SMS, email, error reporter, Google auth
+- `src/chief_of_staff/communication/` — Discord bot (multi-agent routing), SMS, email, error reporter, Google auth
 - `src/chief_of_staff/dashboard/` — Live web dashboard (API + embedded SPA)
 - `src/chief_of_staff/webhooks/` — Twilio, Gmail push, Zoom, Recall.ai webhooks
 - `src/chief_of_staff/config.py` — Pydantic `Settings` (auto-loads from `.env`)
@@ -91,17 +113,26 @@ arcuate_agents/
 ├── .gitignore                   # Excludes .env, credentials, *.db, chroma_data/, venv/
 │
 ├── agents/                      # Agent YAML configs (self-modifiable at runtime)
-│   └── chief_of_staff.yaml      # Main agent — system prompt, tools, permissions
+│   ├── chief_of_staff.yaml      # COS orchestrator — skills, permissions, prompt
+│   └── onboarding.yaml          # Onboarding specialist — skills-based config
 │
 ├── agent_memory/                # Per-agent persistent memory (Markdown files)
-│   └── chief_of_staff.md        # Learnings, preferences, patterns
+│   ├── chief_of_staff.md        # COS learnings, preferences, patterns
+│   └── onboarding.md            # Onboarding specialist memory
 │
 ├── src/chief_of_staff/          # Main application source
 │   ├── __init__.py
 │   ├── main.py                  # FastAPI app, lifespan, route registration
 │   ├── config.py                # Pydantic Settings (env vars → typed config)
 │   ├── agent/                   # Core agent system
-│   ├── communication/           # Discord, SMS, email, error reporter
+│   │   ├── core.py              # Async agentic loop + unified agent cache
+│   │   ├── tools.py             # Facade → delegates to skill modules
+│   │   ├── registry.py          # YAML config loader (supports tools + skills)
+│   │   ├── router.py            # Multi-agent message routing
+│   │   ├── skills/              # Modular tool collections (7 modules)
+│   │   ├── memory.py, activity.py, retry.py, code_ops.py
+│   │   └── ...
+│   ├── communication/           # Discord (multi-agent routing), SMS, email
 │   ├── knowledge/               # ChromaDB + SQLite knowledge store
 │   ├── ingestion/               # Data sync pipeline
 │   ├── dashboard/               # Web dashboard (routes + embedded HTML)
@@ -115,9 +146,13 @@ arcuate_agents/
 ├── tests/                       # Test suite (pytest + pytest-asyncio)
 │   ├── conftest.py              # Shared fixtures (mock configs, mock API)
 │   ├── test_core.py             # Agent loop tests
-│   ├── test_tools.py            # Tool dispatch tests
+│   ├── test_tools.py            # Tool dispatch tests (facade)
+│   ├── test_skills.py           # Skill registry + module tests
+│   ├── test_router.py           # Multi-agent routing tests
 │   ├── test_retry.py            # Retry logic tests
-│   └── test_error_handling.py   # Error wrapping tests
+│   ├── test_error_handling.py   # Error wrapping tests
+│   ├── test_lint_consistency.py # Linter tests
+│   └── test_merge_resolver.py   # Conflict resolution tests
 │
 ├── chroma_data/                 # ChromaDB vector embeddings (gitignored, ~33MB)
 ├── chief_of_staff.db            # SQLite database (gitignored)
@@ -163,40 +198,44 @@ Everything else degrades gracefully — Twilio tools return errors, ingestion sk
 
 ---
 
-## Tools (17)
+## Skills & Tools (7 skills, 17 tools)
 
-All tools are defined in `src/chief_of_staff/agent/tools.py`. Each tool has a name, description, input schema, and an implementation function. Tools are registered in `TOOL_DEFINITIONS` (list of dicts) and dispatched by `execute_tool(name, input, agent_name)`.
+Tools are organized into **skill modules** in `src/chief_of_staff/agent/skills/`. Each skill is a reusable module that any agent can load. The `tools.py` facade delegates to the `SkillRegistry`.
 
-| Tool | Category | Description |
-|------|----------|-------------|
-| `search_knowledge` | Knowledge | Semantic search across all company data (ChromaDB) |
-| `list_recent_emails` | Knowledge | List emails from SQLite DB |
-| `search_meetings` | Knowledge | Search meeting transcripts |
-| `send_sms` | Communication | WhatsApp/SMS via Twilio |
-| `send_email` | Communication | Gmail API (sends from the agent email) |
-| `draft_document` | Communication | Create draft docs |
-| `send_meeting_bot` | Meetings | Dispatch Recall.ai bot (not configured — degrades gracefully) |
-| `update_own_instructions` | Self-Mod | Add/remove/replace standing instructions in YAML |
-| `update_system_prompt` | Self-Mod | Rewrite the agent's base system prompt |
-| `update_triage_config` | Self-Mod | Change Discord triage prompt + trigger words |
-| `remember` | Memory | Store persistent learnings to agent_memory/*.md |
-| `recall_memory` | Memory | Search persistent memory |
-| `create_sub_agent` | Delegation | Create new agent from YAML config |
-| `delegate_task` | Delegation | Send task to sub-agent, get result |
-| `read_own_code` | Code Ops | Read any file in the repo via GitHub API |
-| `edit_own_code` | Code Ops | Validate syntax + stage a file change |
-| `deploy_changes` | Code Ops | Atomic commit of all staged changes → Railway auto-deploy |
+| Skill | Module | Tools |
+|-------|--------|-------|
+| `knowledge` | `skills/knowledge.py` | `search_knowledge`, `list_recent_emails`, `search_meetings` |
+| `communication` | `skills/communication.py` | `send_sms`, `send_email`, `draft_document` |
+| `meetings` | `skills/meetings.py` | `send_meeting_bot` |
+| `self_mod` | `skills/self_mod.py` | `update_own_instructions`, `update_system_prompt`, `update_triage_config` |
+| `memory` | `skills/memory_skill.py` | `remember`, `recall_memory` |
+| `delegation` | `skills/delegation.py` | `create_sub_agent`, `delegate_task` |
+| `code_ops` | `skills/code_ops_skill.py` | `read_own_code`, `edit_own_code`, `deploy_changes` |
 
 Plus `web_search` as a server-side tool (Anthropic built-in, configured in agent YAML).
 
-### Adding a new tool
+Agents load skills by name in their YAML config:
+```yaml
+skills: [knowledge, communication, memory]   # loads 8 tools
+```
 
-1. Define the tool dict in `TOOL_DEFINITIONS` in `tools.py` (name, description, input_schema)
-2. Add the implementation as an async function in `tools.py`
-3. Add a case to the `execute_tool()` dispatcher
-4. Add the tool name to the agent's `tools` list in `agents/*.yaml`
-5. Update `architecture_changelog.yaml` with the change
-6. **Convention**: tools never raise — catch all exceptions and return error strings
+The `SkillRegistry` resolves skill names into flat tool lists. Agents can also reference individual tool names for fine-grained control.
+
+### Adding a new skill
+
+1. Create `src/chief_of_staff/agent/skills/<name>.py`
+2. Export: `SKILL_NAME: str`, `TOOL_DEFINITIONS: dict`, `async execute(tool_name, args, agent_name) -> str`
+3. Add the module name to `_SKILL_MODULES` in `skills/__init__.py`
+4. Add the skill name to agents' `skills:` list in `agents/*.yaml`
+5. **Convention**: skill execute() functions may raise — the facade catches all exceptions
+
+### Adding a new tool to an existing skill
+
+1. Add the tool definition dict to `TOOL_DEFINITIONS` in the skill module
+2. Add a handler case (`elif name == "..."`) in the skill's `execute()` function
+3. Add the tool name to the agent's `tools:` list or ensure the skill is in `skills:`
+4. Update `architecture_changelog.yaml` with the change
+5. **Convention**: tools never raise — the facade's `execute_tool()` catches all exceptions and returns error strings
 
 ---
 
@@ -205,35 +244,50 @@ Plus `web_search` as a server-side tool (Anthropic built-in, configured in agent
 ### Config-driven agents
 
 Each agent is defined in `agents/<name>.yaml` with:
-- `name`, `display_name`, `model`, `max_tokens`, `max_iterations`
+- `name`, `display_name`, `discord_name` — identity and Discord @mention name
+- `model`, `max_tokens`, `max_iterations` — LLM config
 - `system_prompt` — the agent's personality and instructions
-- `tools` — list of tool names the agent can use
+- `skills` — list of skill names to load (e.g., `[knowledge, communication, memory]`)
+- `tools` — list of individual tool names (backward compatible, or for fine-grained control)
 - `server_tools` — Anthropic server-side tools (e.g., web_search)
 - `permissions` — `can_self_modify`, `can_create_agents`, `can_send_external`, `can_modify_code`
 - `standing_instructions` — dynamic list the agent can update at runtime
 - `triage_prompt` — template for Discord message triage
 - `trigger_words` — keywords that always trigger a response
 
+`skills` vs `tools`: Use `skills` to load groups of related tools by skill name. Use `tools` for individual tools or backward compatibility. `get_resolved_tools()` merges both into a flat tool list.
+
 The registry (`registry.py`) re-reads YAML from disk on every `get(name)` call, so config changes (including self-modifications) take effect immediately.
+
+### Multi-agent Discord routing (router.py)
+
+Single Discord bot instance, routes messages to the right agent:
+1. Check for explicit `discord_name` mention (e.g., "hey onboarding")
+2. Match specialist trigger words (checked before COS)
+3. Default: `chief_of_staff`
+
+Trigger words from ALL agents are merged for the bot's `_should_respond()` check. Activity logs use the resolved `agent_name`.
 
 ### Agent loop (core.py)
 
 1. Reload config from YAML (picks up self-modifications)
-2. Build system prompt = base prompt + standing instructions + memory context
-3. Retrieve KB context via semantic search (graceful degradation if ChromaDB is down)
-4. Agentic loop (up to `max_iterations`):
+2. Resolve skills + tools into effective tool list (`get_resolved_tools()`)
+3. Build system prompt = base prompt + standing instructions + memory context
+4. Retrieve KB context via semantic search (graceful degradation if ChromaDB is down)
+5. Agentic loop (up to `max_iterations`):
    - Call Claude API with retry
    - Execute any tool_use blocks (30s timeout per tool)
    - Append results, repeat
-5. Return final text response
-6. Log all activity to SQLite
+6. Return final text response
+7. Log all activity to SQLite
 
 ### Adding a new agent
 
-1. Create `agents/<name>.yaml` following the chief_of_staff.yaml structure
-2. The registry auto-discovers it on next request
-3. Or use the `create_sub_agent` tool at runtime (creates YAML dynamically)
-4. To persist a runtime-created agent across deploys: use `edit_own_code` + `deploy_changes`
+1. Create `agents/<name>.yaml` with at minimum: `name`, `display_name`, `system_prompt`, `skills` or `tools`, `permissions`
+2. Optionally set `discord_name` for @mention routing and `trigger_words` for keyword matching
+3. Create `agent_memory/<name>.md` (empty, auto-populated)
+4. The registry auto-discovers it on next request
+5. Or use the `create_sub_agent` tool at runtime (creates YAML dynamically)
 
 ---
 
@@ -350,15 +404,21 @@ PYTHONPATH=src uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8000
 - `LOG_FORMAT=text` (default, human-readable)
 - Dashboard at `http://localhost:8000/dashboard`
 
-### Deploy workflow
+### Deploy workflow (AI-gated)
 ```bash
 git add <files>
 git commit -m "description"
-git push origin <deploy-branch>
-# Railway auto-deploys in ~3-5 min (Docker build + ChromaDB ONNX download)
+git push origin dev          # push to dev, NOT directly to deploy
+# → GitHub Action fires
+# → Consistency linter runs
+# → Opus 4.6 reviews the diff
+# → If approved: auto-merges dev → deploy branch → Railway deploys
+# → If rejected: Discord notification with what's wrong, nothing deployed
 ```
 
-The agent can also deploy itself via `edit_own_code` + `deploy_changes` tools (Discord).
+**Never push directly to the deploy branch** — always push to `dev` and let the AI gatekeeper decide.
+
+The agent can also deploy itself via `edit_own_code` + `deploy_changes` tools (Discord) — this bypasses the gatekeeper since it writes directly via GitHub API.
 
 ---
 
@@ -368,7 +428,7 @@ The agent can also deploy itself via `edit_own_code` + `deploy_changes` tools (D
 PYTHONPATH=src pytest tests/ -v
 ```
 
-Tests cover: agent loop (text response, timeout, iteration limit), tool dispatch (known/unknown/error), retry logic (429 handling, backoff, max retries), error wrapping (tools return strings, not exceptions).
+Tests cover: agent loop (text response, timeout, iteration limit), skill registry (module loading, tool resolution, dispatch), multi-agent routing (discord_name, trigger words, default fallback), tool dispatch facade (known/unknown/error), retry logic (429 handling, backoff, max retries), error wrapping (tools return strings, not exceptions), consistency linter (skills, activity, YAML validation).
 
 ### Writing new tests
 - Put tests in `tests/test_<module>.py`
@@ -406,14 +466,62 @@ Tests cover: agent loop (text response, timeout, iteration limit), tool dispatch
 
 ---
 
+## Collaboration Guardian (AI Gatekeeper)
+
+AI-powered code review system. Nobody reviews code manually — Opus 4.6 does it.
+
+### How it works
+
+```
+Developer pushes to `dev` branch
+  → GitHub Action triggers
+  → Step 1: Consistency linter (tools ↔ handlers, YAML, activity constants)
+  → Step 2: Opus 4.6 full code review (breaking changes, conflicts, security, async)
+  → APPROVED: auto-merges dev → deploy branch → Railway deploys
+  → REJECTED: Discord notification with what's wrong, nothing deployed
+```
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| AI reviewer | `scripts/ai_review.py` | Sends diff to Opus 4.6 for full code review |
+| Consistency linter | `scripts/lint_consistency.py` | Checks tools ↔ handlers, activity constants ↔ stats, YAML validity |
+| GitHub Action | `.github/workflows/collab-guardian.yml` | Orchestrates: linter → AI review → merge → Discord |
+| Pre-push hook | `.githooks/pre-push` | Local safety net: linter + syntax checks before push |
+| Hook installer | `scripts/install-hooks.sh` | One-time: `bash scripts/install-hooks.sh` |
+| code_ops retry | `src/chief_of_staff/agent/code_ops.py` | `deploy_changes` retries on 422 (non-fast-forward) |
+
+### Setup (one-time)
+
+1. Create Discord webhook for #agent-building channel
+2. Add 3 GitHub repo secrets (Settings > Secrets > Actions):
+   - `DISCORD_WEBHOOK_URL` — webhook from step 1
+   - `ANTHROPIC_API_KEY` — from `.env`
+   - `GH_PAT` — the `GITHUB_TOKEN` value from `.env`
+3. Create `dev` branch: `git checkout -b dev && git push -u origin dev`
+4. Each developer runs: `bash scripts/install-hooks.sh`
+
+### Discord notifications (#agent-building)
+
+- **Blue**: Push received, Opus reviewing...
+- **Green**: Approved & merged to deploy — Railway will auto-deploy
+- **Red**: BLOCKED — lint failed or AI rejected (with details)
+- **Yellow**: AI approved but merge failed (check Action logs)
+
+---
+
 ## Current Status
 
-- **Discord bot**: Running — responds to DMs, @mentions, configured channels
+- **Multi-agent workforce**: COS (orchestrator) + Onboarding Specialist, with skill-based tool loading
+- **Discord bot**: Single bot, multi-agent routing via @mention / trigger words / default COS
+- **Skills system**: 7 reusable skill modules, 17 tools — agents load skills by name
 - **Email**: Sends/reads as the agent email via Gmail API
 - **Knowledge base**: 500+ emails, 27 Google Docs, 35+ ElevenLabs transcripts
 - **Code self-modification**: Working — agent can read/edit/deploy via Discord
 - **Dashboard**: Live with Activity and System tabs
 - **Railway**: Deployed, auto-deploys on push
+- **Tests**: 63 tests passing (skills, routing, core loop, tools, retry, errors, linter)
 - **SMS via Twilio**: Functional but unreliable delivery — Discord preferred
 - **Zoom/Recall.ai**: Code built, credentials not configured (degrades gracefully)
 

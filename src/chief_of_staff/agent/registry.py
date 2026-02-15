@@ -26,12 +26,25 @@ class AgentConfig:
     max_iterations: int = 10
     system_prompt: str = ""
     tools: list[str] = field(default_factory=list)
+    skills: list[str] = field(default_factory=list)
+    discord_name: str = ""
     server_tools: list[dict[str, Any]] = field(default_factory=list)
     permissions: dict[str, Any] = field(default_factory=dict)
     standing_instructions: list[str] = field(default_factory=list)
     triage_prompt: str = ""
     trigger_words: list[str] = field(default_factory=list)
     request_timeout: int = 120
+
+    def get_resolved_tools(self) -> list[str]:
+        """Resolve skills + explicit tools into a flat tool name list."""
+        if not self.skills:
+            return self.tools  # backward compatible
+        from chief_of_staff.agent.skills import get_skill_registry
+        resolved = get_skill_registry().resolve_skills(self.skills)
+        for t in self.tools:
+            if t not in resolved:
+                resolved.append(t)
+        return resolved
 
     @classmethod
     def from_yaml(cls, path: Path) -> AgentConfig:
@@ -46,6 +59,8 @@ class AgentConfig:
             max_iterations=data.get("max_iterations", 10),
             system_prompt=data.get("system_prompt", ""),
             tools=data.get("tools", []),
+            skills=data.get("skills", []),
+            discord_name=data.get("discord_name", ""),
             server_tools=data.get("server_tools", []),
             permissions=data.get("permissions", {}),
             standing_instructions=data.get("standing_instructions", []),
@@ -64,6 +79,8 @@ class AgentConfig:
             "max_iterations": self.max_iterations,
             "system_prompt": self.system_prompt,
             "tools": self.tools,
+            "skills": self.skills,
+            "discord_name": self.discord_name,
             "server_tools": self.server_tools,
             "permissions": self.permissions,
             "standing_instructions": self.standing_instructions,

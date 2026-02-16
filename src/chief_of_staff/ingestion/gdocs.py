@@ -121,6 +121,47 @@ def _list_accessible_shared_drive_ids(drive: Any, limit: int = 200) -> list[str]
     return drive_ids
 
 
+def debug_drive_visibility(max_results: int = 20) -> dict[str, Any]:
+    """Return diagnostic details about Google Drive visibility for this token."""
+    drive = get_drive_service()
+
+    account = {"email": "", "displayName": ""}
+    try:
+        about = drive.about().get(fields="user(emailAddress,displayName)").execute()
+        account = about.get("user", account) or account
+    except Exception as e:
+        logger.warning(f"Failed to fetch Drive account info: {e}")
+
+    shared_drive_ids = _list_accessible_shared_drive_ids(drive)
+
+    base_query = "mimeType='application/vnd.google-apps.document' and trashed=false"
+    all_docs = _iter_doc_files(drive, query=base_query, max_results=max_results, corpora="allDrives")
+    shared_with_me_docs = _iter_doc_files(
+        drive,
+        query=f"{base_query} and sharedWithMe=true",
+        max_results=max_results,
+        corpora="allDrives",
+    )
+
+    sample = [
+        {
+            "id": f.get("id", ""),
+            "name": f.get("name", ""),
+            "driveId": f.get("driveId", ""),
+        }
+        for f in all_docs[:10]
+    ]
+
+    return {
+        "account": account,
+        "shared_drive_count": len(shared_drive_ids),
+        "shared_drive_ids": shared_drive_ids[:25],
+        "all_drives_doc_count": len(all_docs),
+        "shared_with_me_doc_count": len(shared_with_me_docs),
+        "sample_docs": sample,
+    }
+
+
 def _list_docs_from_drive(drive: Any, folder_id: str | None, max_results: int) -> list[dict[str, Any]]:
     """Get documents from My Drive, shared-with-me, and optional Shared Drives."""
     query_parts = [

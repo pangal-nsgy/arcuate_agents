@@ -187,6 +187,14 @@ async def trigger_docs_ingestion(folder_id: str | None = None, max_results: int 
     return {"docs_ingested": count}
 
 
+@app.get("/api/ingest/docs/debug")
+async def debug_docs_ingestion(max_results: int = 20):
+    """Inspect Google Drive visibility for the current OAuth token."""
+    from chief_of_staff.ingestion.gdocs import debug_drive_visibility
+
+    return debug_drive_visibility(max_results=max_results)
+
+
 @app.post("/api/ingest/transcripts")
 async def trigger_transcript_ingestion(limit: int = 50):
     """Manually trigger ElevenLabs transcript ingestion."""

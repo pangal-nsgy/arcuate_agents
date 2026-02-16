@@ -123,8 +123,8 @@ def build_review_prompt(diff: str, changed_files: list[str], file_contents: dict
     file_contents_section = ""
     for path, content in file_contents.items():
         # Truncate very large files
-        if len(content) > 5000:
-            content = content[:5000] + "\n... (truncated)"
+        if len(content) > 10000:
+            content = content[:10000] + "\n... (truncated)"
         file_contents_section += f"\n### {path}\n```\n{content}\n```\n"
 
     return f"""You are a senior code reviewer for an AI agent system (Python/FastAPI). Your job is to decide whether this push is safe to deploy to production.
@@ -137,7 +137,7 @@ def build_review_prompt(diff: str, changed_files: list[str], file_contents: dict
 
 ## Diff
 ```diff
-{diff[:15000]}
+{diff[:50000]}
 ```
 
 ## Full Content of Changed Files

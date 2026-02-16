@@ -28,12 +28,12 @@ class TestSkillRegistry:
         assert "execution" in registry._skills
 
     def test_all_25_tools_mapped(self):
-        """All 25 tools should be mapped to their skill modules."""
+        """All 27 tools should be mapped to their skill modules."""
         registry = SkillRegistry()
         registry._ensure_loaded()
-        assert len(registry._tool_map) == 25
+        assert len(registry._tool_map) == 27
         expected = [
-            "search_knowledge", "list_recent_emails", "search_meetings",
+            "search_knowledge", "list_recent_emails", "search_meetings", "research_practice", "catch_me_up",
             "send_sms", "send_email", "draft_document",
             "send_meeting_bot",
             "show_current_prompt", "update_own_instructions", "update_system_prompt", "update_triage_config",
@@ -90,10 +90,10 @@ class TestSkillRegistry:
         assert tools.count("search_knowledge") == 1
 
     def test_get_all_tool_definitions(self):
-        """get_all_tool_definitions returns all 25 tools."""
+        """get_all_tool_definitions returns all 27 tools."""
         registry = SkillRegistry()
         all_defs = registry.get_all_tool_definitions()
-        assert len(all_defs) == 25
+        assert len(all_defs) == 27
 
 
 class TestSkillExecution:

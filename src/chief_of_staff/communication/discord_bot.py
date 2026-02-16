@@ -291,6 +291,29 @@ def get_discord_bot() -> ChiefOfStaffBot:
     return _bot
 
 
+async def send_to_channel(channel_name: str, message: str) -> bool:
+    """Send a message to a named Discord channel. Splits at 2000 char limit."""
+    try:
+        bot = get_discord_bot()
+    except RuntimeError:
+        logger.warning(f"Discord bot not initialized — cannot send to #{channel_name}")
+        return False
+
+    for guild in bot.guilds:
+        for ch in guild.text_channels:
+            if ch.name == channel_name:
+                try:
+                    for chunk in _split_message(message):
+                        await ch.send(chunk)
+                    return True
+                except Exception as e:
+                    logger.error(f"Failed to send to #{channel_name}: {e}")
+                    return False
+
+    logger.warning(f"Discord channel #{channel_name} not found")
+    return False
+
+
 async def start_discord_bot():
     """Start the Discord bot (runs forever)."""
     token = settings.discord_bot_token

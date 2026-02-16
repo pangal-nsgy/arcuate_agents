@@ -8,6 +8,7 @@ Handles:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -90,6 +91,9 @@ async def recall_bot_status(request: Request) -> dict:
             # Notify founders
             await _notify_founders_transcript_ready(bot_id, doc_id)
 
+            # Generate AI debrief in background
+            asyncio.create_task(_trigger_meeting_debrief(bot_id, doc_id))
+
         except Exception as e:
             logger.error(f"Failed to ingest Recall transcript for bot {bot_id}: {e}")
 
@@ -115,3 +119,29 @@ async def _notify_founders_transcript_ready(bot_id: str, doc_id: str) -> None:
             )
     except Exception as e:
         logger.error(f"Failed to send transcript notification: {e}")
+
+
+async def _trigger_meeting_debrief(bot_id: str, doc_id: str) -> None:
+    """Generate and post a meeting debrief in the background."""
+    try:
+        from chief_of_staff.ingestion.recall_bot import get_bot_status
+        from chief_of_staff.knowledge import store as knowledge_store
+
+        # Get meeting title
+        bot_info = await get_bot_status(bot_id)
+        title = bot_info.get("metadata", {}).get("title", "a meeting")
+
+        # Retrieve the transcript from the knowledge base
+        results = knowledge_store.search(query=doc_id, n_results=1)
+        transcript_text = results[0]["text"] if results else ""
+
+        if not transcript_text:
+            logger.warning(f"No transcript found for debrief: bot={bot_id}, doc={doc_id}")
+            return
+
+        from chief_of_staff.agent.briefing import generate_meeting_debrief, post_meeting_debrief
+        feedback, is_important = await generate_meeting_debrief(title, transcript_text)
+        if feedback:
+            await post_meeting_debrief(title, feedback, is_important)
+    except Exception as e:
+        logger.error(f"Meeting debrief failed for bot {bot_id}: {e}", exc_info=True)

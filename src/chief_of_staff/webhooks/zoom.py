@@ -16,6 +16,7 @@ Setup:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -160,6 +161,7 @@ async def _handle_recording_completed(payload: dict[str, Any]) -> None:
 
     recording_files = meeting.get("recording_files", [])
     transcript_ingested = False
+    transcript_text = ""
 
     for rec_file in recording_files:
         file_type = rec_file.get("file_type", "")
@@ -179,18 +181,19 @@ async def _handle_recording_completed(payload: dict[str, Any]) -> None:
                 raw = await get_recording_transcript(download_url)
 
                 if file_type == "TRANSCRIPT" or recording_type == "audio_transcript":
-                    transcript = parse_vtt_transcript(raw)
+                    transcript_text = parse_vtt_transcript(raw)
                     content = (
                         f"Meeting: {topic}\n"
                         f"Date: {start_time}\n"
                         f"Duration: {duration} minutes\n"
                         f"Host: {host_email}\n"
                         f"Platform: Zoom\n"
-                        f"\n--- Transcript ---\n{transcript}"
+                        f"\n--- Transcript ---\n{transcript_text}"
                     )
                     source_id = f"zoom_transcript_{meeting_id}"
                     title = f"Zoom Meeting: {topic}"
                 else:
+                    transcript_text = raw
                     content = (
                         f"Meeting Chat: {topic}\n"
                         f"Date: {start_time}\n"
@@ -235,6 +238,10 @@ async def _handle_recording_completed(payload: dict[str, Any]) -> None:
         # Notify founders that a meeting transcript is now available
         await _notify_transcript_ready(topic, start_time, duration)
 
+        # Generate AI debrief in background
+        if transcript_text:
+            asyncio.create_task(_trigger_meeting_debrief(topic, transcript_text))
+
 
 async def _notify_transcript_ready(topic: str, start_time: str, duration: int) -> None:
     """Send a notification to founders that a meeting transcript was ingested."""
@@ -260,3 +267,15 @@ def _is_internal_meeting(host_email: str) -> bool:
     internal_domains = {"arcuate.health", "arcuatehealth.com"}
     domain = host_email.split("@")[-1].lower() if "@" in host_email else ""
     return domain in internal_domains
+
+
+async def _trigger_meeting_debrief(topic: str, transcript_text: str) -> None:
+    """Generate and post a meeting debrief in the background."""
+    try:
+        from chief_of_staff.agent.briefing import generate_meeting_debrief, post_meeting_debrief
+
+        feedback, is_important = await generate_meeting_debrief(topic, transcript_text)
+        if feedback:
+            await post_meeting_debrief(topic, feedback, is_important)
+    except Exception as e:
+        logger.error(f"Meeting debrief failed for '{topic}': {e}", exc_info=True)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Generator
 
@@ -79,6 +79,20 @@ CREATE TABLE IF NOT EXISTS complaints (
     severity TEXT NOT NULL DEFAULT 'medium',
     summary TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_actions (
+    id TEXT PRIMARY KEY,
+    action_type TEXT NOT NULL,
+    schedule_type TEXT NOT NULL,
+    schedule_time TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    target TEXT DEFAULT '',
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    last_run_at TEXT,
+    next_run_at TEXT,
     created_at TEXT NOT NULL
 );
 """
@@ -266,3 +280,123 @@ def get_open_complaints(limit: int = 50) -> list[dict[str, Any]]:
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def create_scheduled_action(
+    action_id: str,
+    action_type: str,
+    schedule_type: str,
+    schedule_time: str,
+    channel: str,
+    target: str,
+    prompt: str,
+) -> None:
+    """Create a new scheduled action."""
+    now = datetime.utcnow().isoformat()
+    # Compute initial next_run_at
+    next_run = _compute_next_run(schedule_type, schedule_time, now)
+    with _get_conn() as conn:
+        conn.execute(
+            """INSERT INTO scheduled_actions
+            (id, action_type, schedule_type, schedule_time, channel, target, prompt, status, next_run_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+            (action_id, action_type, schedule_type, schedule_time, channel, target, prompt, next_run, now),
+        )
+
+
+def get_due_actions(now_iso: str) -> list[dict[str, Any]]:
+    """Get scheduled actions that are due for execution."""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM scheduled_actions WHERE status = 'active' AND next_run_at <= ? ORDER BY next_run_at ASC",
+            (now_iso,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_action_run(action_id: str, now_iso: str) -> None:
+    """Mark a scheduled action as run and compute next execution time."""
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT schedule_type, schedule_time FROM scheduled_actions WHERE id = ?",
+            (action_id,),
+        ).fetchone()
+        if not row:
+            return
+        schedule_type = row["schedule_type"]
+        schedule_time = row["schedule_time"]
+
+        if schedule_type == "once":
+            conn.execute(
+                "UPDATE scheduled_actions SET last_run_at = ?, status = 'completed' WHERE id = ?",
+                (now_iso, action_id),
+            )
+        else:
+            next_run = _compute_next_run(schedule_type, schedule_time, now_iso)
+            conn.execute(
+                "UPDATE scheduled_actions SET last_run_at = ?, next_run_at = ? WHERE id = ?",
+                (now_iso, next_run, action_id),
+            )
+
+
+def seed_default_actions() -> None:
+    """Insert default scheduled actions (idempotent — uses INSERT OR IGNORE)."""
+    now = datetime.utcnow().isoformat()
+    defaults = [
+        ("default_daily_briefing", "daily_briefing", "daily", "13:00", "discord", "daily-briefing", "Generate daily briefing"),
+        ("default_weekly_pulse", "weekly_pulse", "weekly", "14:00", "discord", "team-health", "Generate weekly team health pulse"),
+        ("default_engagement_check", "engagement_check", "daily", "13:00", "discord", "", "Check team engagement"),
+    ]
+    with _get_conn() as conn:
+        for action_id, action_type, sched_type, sched_time, channel, target, prompt in defaults:
+            next_run = _compute_next_run(sched_type, sched_time, now)
+            conn.execute(
+                """INSERT OR IGNORE INTO scheduled_actions
+                (id, action_type, schedule_type, schedule_time, channel, target, prompt, status, next_run_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+                (action_id, action_type, sched_type, sched_time, channel, target, prompt, next_run, now),
+            )
+
+
+def _compute_next_run(schedule_type: str, schedule_time: str, after_iso: str) -> str:
+    """Compute the next run time for a scheduled action.
+
+    For 'daily': next occurrence of schedule_time (HH:MM) after the given time.
+    For 'weekly': next Monday at schedule_time after the given time.
+    For 'once': schedule_time is already a full ISO datetime.
+    """
+    if schedule_type == "once":
+        return schedule_time
+
+    # Parse the "after" time
+    try:
+        after = datetime.fromisoformat(after_iso)
+    except ValueError:
+        after = datetime.utcnow()
+
+    # Parse HH:MM
+    parts = schedule_time.split(":")
+    hour = int(parts[0]) if len(parts) >= 1 else 0
+    minute = int(parts[1]) if len(parts) >= 2 else 0
+
+    if schedule_type == "daily":
+        candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= after:
+            candidate += timedelta(days=1)
+        return candidate.isoformat()
+
+    if schedule_type == "weekly":
+        # Next Monday
+        days_until_monday = (7 - after.weekday()) % 7
+        if days_until_monday == 0:
+            candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if candidate <= after:
+                days_until_monday = 7
+            else:
+                return candidate.isoformat()
+        candidate = (after + timedelta(days=days_until_monday)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0,
+        )
+        return candidate.isoformat()
+
+    return after.isoformat()

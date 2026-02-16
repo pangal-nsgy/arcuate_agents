@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     gmail_pubsub_subscription: str = ""  # expected Pub/Sub subscription for webhook auth
     webhook_base_url: str = "http://localhost:8000"
 
+    # Gmail push notifications
+    gmail_watch_topic: str = ""  # Pub/Sub topic for Gmail watch (e.g., projects/agents-arcuate/topics/gmail-push)
+
+    # Discord channels for proactive features
+    briefing_channel: str = "daily-briefing"
+    meeting_notes_channel: str = "meeting-notes"
+    team_health_channel: str = "team-health"
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000

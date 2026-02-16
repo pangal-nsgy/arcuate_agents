@@ -38,12 +38,13 @@ class Settings(BaseSettings):
 
     # Discord
     discord_bot_token: str = ""
+    enable_discord_bot: bool = True
     discord_channels: list[str] = ["chief-of-staff", "arcuatechat"]  # bot responds in these channels + DMs + @mentions
 
     # GitHub (code self-modification)
     github_token: str = ""
     github_repo: str = "pangal-nsgy/arcuate_agents"
-    github_branch: str = "claude/mcp-chrome-extension-BW3zj"
+    github_branch: str = "dev"
 
     # Agent config
     chief_email: str = ""

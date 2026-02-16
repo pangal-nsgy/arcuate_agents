@@ -72,10 +72,13 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     logger.info("Background scheduler started")
 
-    # Start Discord bot if configured
-    from chief_of_staff.communication.discord_bot import start_discord_bot
-    asyncio.create_task(start_discord_bot())
-    logger.info("Discord bot task started")
+    # Start Discord bot if enabled and configured
+    if settings.enable_discord_bot:
+        from chief_of_staff.communication.discord_bot import start_discord_bot
+        asyncio.create_task(start_discord_bot())
+        logger.info("Discord bot task started")
+    else:
+        logger.info("Discord bot startup disabled (ENABLE_DISCORD_BOT=false)")
 
     yield
     logger.info("Shutting down Chief of Staff Agent")

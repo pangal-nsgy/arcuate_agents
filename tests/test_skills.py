@@ -26,16 +26,16 @@ class TestSkillRegistry:
         assert "code_ops" in registry._skills
         assert "orchestration" in registry._skills
 
-    def test_all_20_tools_mapped(self):
-        """All 20 tools should be mapped to their skill modules."""
+    def test_all_21_tools_mapped(self):
+        """All 21 tools should be mapped to their skill modules."""
         registry = SkillRegistry()
         registry._ensure_loaded()
-        assert len(registry._tool_map) == 20
+        assert len(registry._tool_map) == 21
         expected = [
             "search_knowledge", "list_recent_emails", "search_meetings",
             "send_sms", "send_email", "draft_document",
             "send_meeting_bot",
-            "update_own_instructions", "update_system_prompt", "update_triage_config",
+            "show_current_prompt", "update_own_instructions", "update_system_prompt", "update_triage_config",
             "remember", "recall_memory",
             "create_sub_agent", "delegate_task",
             "read_own_code", "edit_own_code", "deploy_changes",
@@ -88,10 +88,10 @@ class TestSkillRegistry:
         assert tools.count("search_knowledge") == 1
 
     def test_get_all_tool_definitions(self):
-        """get_all_tool_definitions returns all 20 tools."""
+        """get_all_tool_definitions returns all 21 tools."""
         registry = SkillRegistry()
         all_defs = registry.get_all_tool_definitions()
-        assert len(all_defs) == 20
+        assert len(all_defs) == 21
 
 
 class TestSkillExecution:
@@ -124,6 +124,20 @@ class TestSkillExecution:
             "test",
         )
         assert "draft_created" in result
+
+    @pytest.mark.asyncio
+    async def test_show_current_prompt_dispatches(self):
+        """show_current_prompt returns the current base prompt text."""
+        registry = SkillRegistry()
+        with patch("chief_of_staff.agent.registry.AgentRegistry.get") as mock_get:
+            mock_get.return_value = type(
+                "Cfg",
+                (),
+                {"system_prompt": "Base prompt", "build_system_prompt": lambda self: "Effective prompt"},
+            )()
+            result = await registry.execute_tool("show_current_prompt", {}, "chief_of_staff")
+        assert "Base system_prompt" in result
+        assert "Base prompt" in result
 
     @pytest.mark.asyncio
     async def test_remember_dispatches(self):

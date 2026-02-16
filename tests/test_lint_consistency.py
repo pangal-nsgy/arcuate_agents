@@ -34,13 +34,13 @@ class TestToolsConsistency:
         skills_dir = REPO_ROOT / "src" / "chief_of_staff" / "agent" / "skills"
         assert skills_dir.is_dir(), f"skills/ not found at {skills_dir}"
 
-    def test_all_20_tools_defined(self):
-        """Verify the expected 20 tools are defined across skill modules."""
+    def test_all_21_tools_defined(self):
+        """Verify the expected 21 tools are defined across skill modules."""
         tool_names = _get_defined_tool_names()
         expected_tools = [
             "search_knowledge", "send_sms", "send_email", "draft_document",
             "list_recent_emails", "search_meetings", "send_meeting_bot",
-            "update_own_instructions", "update_system_prompt", "update_triage_config",
+            "show_current_prompt", "update_own_instructions", "update_system_prompt", "update_triage_config",
             "remember", "recall_memory", "create_sub_agent", "delegate_task",
             "read_own_code", "edit_own_code", "deploy_changes",
             "create_task_plan", "execute_task_plan", "scaffold_skill",

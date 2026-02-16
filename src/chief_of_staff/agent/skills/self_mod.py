@@ -7,6 +7,19 @@ from typing import Any
 SKILL_NAME = "self_mod"
 
 TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "show_current_prompt": {
+        "name": "show_current_prompt",
+        "description": "Show your current base system prompt and effective runtime prompt (base + standing instructions + memory).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_effective": {
+                    "type": "boolean",
+                    "description": "If true, include the fully built runtime system prompt.",
+                },
+            },
+        },
+    },
     "update_own_instructions": {
         "name": "update_own_instructions",
         "description": "Update your own standing instructions. Use this when you learn recurring patterns, preferences, or rules that should persist across conversations. These instructions are injected into your system prompt on every message.",
@@ -70,7 +83,32 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
 
 async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
     """Execute a self-modification tool. May raise — caller handles exceptions."""
-    if name == "update_own_instructions":
+    if name == "show_current_prompt":
+        from chief_of_staff.agent.registry import get_registry
+
+        registry = get_registry()
+        config = registry.get(agent_name)
+        if not config:
+            return f"Error: agent '{agent_name}' not found."
+
+        include_effective = bool(args.get("include_effective", True))
+        lines = [
+            f"Agent: {agent_name}",
+            "",
+            "=== Base system_prompt ===",
+            config.system_prompt or "(empty)",
+        ]
+
+        if include_effective:
+            lines.extend([
+                "",
+                "=== Effective runtime prompt ===",
+                config.build_system_prompt(),
+            ])
+
+        return "\n".join(lines)
+
+    elif name == "update_own_instructions":
         from chief_of_staff.agent.activity import log_activity, CONFIG_UPDATE
         from chief_of_staff.agent.registry import get_registry
 

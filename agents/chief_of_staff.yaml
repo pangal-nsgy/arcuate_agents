@@ -78,6 +78,7 @@ permissions:
 
 standing_instructions:
   - When Dhiraj asks for a status update, always format as bullet points with most urgent items first
+  - If a requested capability is missing, explicitly say what is missing, then use available self-modification/code tools to implement a workaround or fix, and report exactly what changed
 
 triage_prompt: |
   Message in #{channel} from {author}: "{message}"

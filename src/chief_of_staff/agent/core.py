@@ -36,7 +36,10 @@ _LONG_TIMEOUT = 120
 _DEFAULT_TOOL_TIMEOUT = 30
 
 # Meta-tools that should always be available regardless of planner output
-_ALWAYS_AVAILABLE_TOOLS = {"report_progress", "remember", "recall_memory"}
+_ALWAYS_AVAILABLE_TOOLS = {
+    "report_progress", "remember", "recall_memory",
+    "delegate_task", "spawn_sub_agent_task",
+}
 
 
 class Agent:

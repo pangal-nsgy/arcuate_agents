@@ -94,6 +94,33 @@ def _iter_doc_files(
     return out
 
 
+def _list_accessible_shared_drive_ids(drive: Any, limit: int = 200) -> list[str]:
+    """List shared drive IDs visible to the authenticated Google account."""
+    drive_ids: list[str] = []
+    page_token: str | None = None
+
+    while len(drive_ids) < limit:
+        page_size = min(100, limit - len(drive_ids))
+        kwargs: dict[str, Any] = {
+            "pageSize": page_size,
+            "fields": "nextPageToken, drives(id, name)",
+        }
+        if page_token:
+            kwargs["pageToken"] = page_token
+
+        resp = drive.drives().list(**kwargs).execute()
+        for row in resp.get("drives", []):
+            drive_id = row.get("id")
+            if drive_id:
+                drive_ids.append(drive_id)
+
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+
+    return drive_ids
+
+
 def _list_docs_from_drive(drive: Any, folder_id: str | None, max_results: int) -> list[dict[str, Any]]:
     """Get documents from My Drive, shared-with-me, and optional Shared Drives."""
     query_parts = [
@@ -132,7 +159,17 @@ def _list_docs_from_drive(drive: Any, folder_id: str | None, max_results: int) -
 
     # 3) Optional explicit shared drives/workspaces.
     raw_drive_ids = settings.google_shared_drive_ids.strip()
-    drive_ids = [d.strip() for d in raw_drive_ids.split(",") if d.strip()]
+    configured_drive_ids = [d.strip() for d in raw_drive_ids.split(",") if d.strip()]
+    discovered_drive_ids: list[str] = []
+    try:
+        discovered_drive_ids = _list_accessible_shared_drive_ids(drive)
+    except Exception as e:
+        logger.warning(f"Could not auto-discover shared drives: {e}")
+
+    drive_ids = sorted(set(configured_drive_ids + discovered_drive_ids))
+    if drive_ids:
+        logger.info(f"Google Docs ingestion scanning {len(drive_ids)} shared drive(s)")
+
     for drive_id in drive_ids:
         if len(files) >= max_results:
             break

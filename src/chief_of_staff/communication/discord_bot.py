@@ -24,6 +24,8 @@ YES if the message contains: angie, agent, agent1, chief of staff, cos, bot — 
 NO only for pure casual chat, single-word reactions, or messages clearly not needing any response."""
 
 _DEFAULT_TRIGGER_WORDS = {"angie", "agent1", "agent 1", "chief of staff", "cos,", "hey bot", "hey agent"}
+_PROGRESS_MIN_SEND_INTERVAL_SECONDS = 8.0
+_PROGRESS_HEARTBEAT_SECONDS = 25.0
 
 
 class ChiefOfStaffBot(discord.Client):
@@ -181,14 +183,47 @@ class ChiefOfStaffBot(discord.Client):
             metadata={"channel_name": channel_name, "is_dm": is_dm, "is_mention": is_mentioned},
         )
 
-        # Build a progress callback that sends intermediate messages to the channel
+        progress_queue: asyncio.Queue[str] = asyncio.Queue()
+        progress_done = asyncio.Event()
+        last_enqueued_msg = ""
+
+        # Queue progress updates; a background worker sends them at safe intervals.
         async def _progress(msg: str) -> None:
-            try:
-                await message.channel.send(msg)
-            except Exception:
-                pass
+            nonlocal last_enqueued_msg
+            clean = (msg or "").strip()
+            if not clean:
+                return
+            if clean == last_enqueued_msg:
+                return
+            last_enqueued_msg = clean
+            await progress_queue.put(clean)
+
+        async def _progress_worker() -> None:
+            last_sent_at = 0.0
+            loop = asyncio.get_running_loop()
+            while True:
+                if progress_done.is_set() and progress_queue.empty():
+                    break
+                try:
+                    msg = await asyncio.wait_for(progress_queue.get(), timeout=_PROGRESS_HEARTBEAT_SECONDS)
+                except asyncio.TimeoutError:
+                    if progress_done.is_set():
+                        break
+                    msg = "Still working on this..."
+
+                now = loop.time()
+                wait_for = _PROGRESS_MIN_SEND_INTERVAL_SECONDS - (now - last_sent_at)
+                if wait_for > 0:
+                    await asyncio.sleep(wait_for)
+
+                try:
+                    await message.channel.send(msg)
+                    last_sent_at = loop.time()
+                except Exception as e:
+                    logger.warning(f"Failed to send progress update in Discord: {e}")
 
         # Show typing indicator while processing
+        progress_task = asyncio.create_task(_progress_worker())
         async with message.channel.typing():
             try:
                 agent = self._get_agent(agent_name)
@@ -245,6 +280,12 @@ class ChiefOfStaffBot(discord.Client):
                 except Exception:
                     logger.error("Failed to report error to #bot-errors", exc_info=True)
                 await message.reply("Something went wrong processing your message. Please try again.")
+            finally:
+                progress_done.set()
+                try:
+                    await asyncio.wait_for(progress_task, timeout=2.0)
+                except Exception:
+                    progress_task.cancel()
 
     async def _build_history(self, channel, limit: int = 10) -> list[dict[str, Any]]:
         """Build conversation history from recent messages in the channel."""

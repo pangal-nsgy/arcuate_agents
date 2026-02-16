@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     google_token_path: str = "./token.json"
     google_credentials_json: str = ""  # JSON string (for Railway/Docker — overrides file)
     google_token_json: str = ""  # JSON string (for Railway/Docker — overrides file)
+    google_shared_drive_ids: str = ""  # Comma-separated shared drive IDs to include in indexing
 
     # Zoom (Server-to-Server OAuth)
     zoom_account_id: str = ""

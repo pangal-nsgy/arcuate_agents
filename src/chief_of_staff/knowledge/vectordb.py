@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import chromadb
@@ -13,6 +14,20 @@ _client: chromadb.ClientAPI | None = None
 _collection: chromadb.Collection | None = None
 
 COLLECTION_NAME = "chief_of_staff_knowledge"
+
+
+def _sanitize_metadata_value(value: Any) -> Any:
+    """Chroma metadata values must be scalar. Serialize complex values."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
+def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {k: _sanitize_metadata_value(v) for k, v in metadata.items()}
 
 
 def get_collection() -> chromadb.Collection:
@@ -39,6 +54,7 @@ def add_document(
     base_meta = {"source": source, "doc_id": doc_id}
     if metadata:
         base_meta.update(metadata)
+    base_meta = _sanitize_metadata(base_meta)
 
     ids = []
     documents = []

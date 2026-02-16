@@ -52,6 +52,23 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "required": ["plan_id"],
         },
     },
+    "list_available_tools": {
+        "name": "list_available_tools",
+        "description": (
+            "List all tools and skills available in the system. Use this to check what capabilities "
+            "exist before spawning or equipping an agent. Returns tool names grouped by skill, plus "
+            "a list of all registered agents and their skills."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_agents": {
+                    "type": "boolean",
+                    "description": "Also list all registered agents and their skills (default true).",
+                },
+            },
+        },
+    },
     "scaffold_skill": {
         "name": "scaffold_skill",
         "description": "Create a new skill module stub in the codebase, optionally attaching it to an agent's skills list.",
@@ -166,9 +183,41 @@ def _coerce_tasks(goal: str, raw_tasks: list[dict[str, Any]] | None) -> list[dic
     return tasks
 
 
+def _list_available_tools(args: dict[str, Any], agent_name: str) -> str:
+    """List all tools grouped by skill, and optionally all registered agents."""
+    from chief_of_staff.agent.skills import get_skill_registry
+    from chief_of_staff.agent.registry import get_registry
+
+    registry = get_skill_registry()
+    registry._ensure_loaded()
+
+    # Group tools by skill
+    lines: list[str] = ["## Available Skills & Tools\n"]
+    for skill_name, skill_mod in sorted(registry._skills.items()):
+        tool_names = list(getattr(skill_mod, "TOOL_DEFINITIONS", {}).keys())
+        lines.append(f"**{skill_name}** ({len(tool_names)} tools): {', '.join(tool_names)}")
+    lines.append(f"\nTotal: {len(registry._tool_map)} tools across {len(registry._skills)} skills")
+
+    include_agents = args.get("include_agents", True)
+    if include_agents:
+        lines.append("\n## Registered Agents\n")
+        agent_registry = get_registry()
+        for cfg in agent_registry.list_agents():
+            skills_str = ", ".join(cfg.skills) if cfg.skills else "(none)"
+            lines.append(
+                f"**{cfg.display_name}** (name: {cfg.name}) — "
+                f"skills: [{skills_str}], model: {cfg.model}"
+            )
+
+    return "\n".join(lines)
+
+
 async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
     """Execute an orchestration tool."""
-    if name == "create_task_plan":
+    if name == "list_available_tools":
+        return _list_available_tools(args, agent_name)
+
+    elif name == "create_task_plan":
         goal = args.get("goal", "").strip()
         if not goal:
             return "Error: goal is required."

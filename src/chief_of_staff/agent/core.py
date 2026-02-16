@@ -44,6 +44,7 @@ _ALWAYS_AVAILABLE_TOOLS = {
     "report_progress", "remember", "recall_memory",
     "delegate_task", "spawn_sub_agent_task",
     "create_task_plan", "execute_task_plan", "scaffold_skill",
+    "list_available_tools",
 }
 
 _CAPABILITY_REFUSAL_PATTERNS = (
@@ -81,6 +82,7 @@ _TOOL_DISPLAY_NAMES = {
     "create_task_plan": "Creating task plan",
     "execute_task_plan": "Executing task plan",
     "scaffold_skill": "Scaffolding new skill",
+    "list_available_tools": "Checking available tools",
 }
 
 

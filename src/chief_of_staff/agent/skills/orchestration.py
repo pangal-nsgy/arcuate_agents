@@ -229,14 +229,25 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
                             },
                             agent_name,
                         )
-                    step.status = "failed"
-                    step.result = (
-                        f"Missing required skill '{step.required_skill}' on agent '{step.agent_name}'. "
-                        f"{scaffold_msg}".strip()
-                    )
-                    if stop_on_error:
-                        return f"Execution stopped on step {idx + 1}: {step.result}\n{plan.summary}"
-                    continue
+                        # Retry capability check after scaffold/attach.
+                        if not _agent_has_skill_or_tool(step.agent_name, step.required_skill):
+                            step.status = "failed"
+                            step.result = (
+                                f"Missing required skill '{step.required_skill}' on agent '{step.agent_name}'. "
+                                f"{scaffold_msg}".strip()
+                            )
+                            if stop_on_error:
+                                return f"Execution stopped on step {idx + 1}: {step.result}\n{plan.summary}"
+                            continue
+                    else:
+                        step.status = "failed"
+                        step.result = (
+                            f"Missing required skill '{step.required_skill}' on agent '{step.agent_name}'. "
+                            "auto_scaffold_missing_skills is false."
+                        )
+                        if stop_on_error:
+                            return f"Execution stopped on step {idx + 1}: {step.result}\n{plan.summary}"
+                        continue
 
                 try:
                     if step.tool_name:

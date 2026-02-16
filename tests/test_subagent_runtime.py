@@ -3,37 +3,25 @@
 from __future__ import annotations
 
 import json
-import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from chief_of_staff.agent.skills.delegation import execute, _ACTIVE_SUBAGENT_TASKS
+from chief_of_staff.agent.skills.delegation import execute
+from chief_of_staff.agent.subagent_runtime import _ACTIVE_SUBAGENT_TASKS, recover_pending_sub_agent_runs
 
 
 @pytest.mark.asyncio
 async def test_spawn_sub_agent_task_creates_run_and_returns_id():
     """spawn_sub_agent_task should persist a run and return acceptance text."""
-    _ACTIVE_SUBAGENT_TASKS.clear()
     fake_ctx = SimpleNamespace(channel="discord", user_id="u1", session_id="s1")
-    fake_registry = SimpleNamespace(
-        get=lambda _name: SimpleNamespace(permissions={"max_delegation_depth": 3})
-    )
-    original_create_task = asyncio.create_task
-    spawned: list[asyncio.Task] = []
-
-    def _capture_task(coro):
-        task = original_create_task(coro)
-        spawned.append(task)
-        return task
+    fake_registry = SimpleNamespace(get=lambda _name: SimpleNamespace(permissions={"max_delegation_depth": 3}))
 
     with (
         patch("chief_of_staff.agent.request_context.get_request_context", return_value=fake_ctx),
         patch("chief_of_staff.agent.registry.get_registry", return_value=fake_registry),
-        patch("chief_of_staff.knowledge.database.create_sub_agent_run") as create_run,
-        patch("chief_of_staff.agent.skills.delegation._run_spawned_subagent", return_value=None),
-        patch("chief_of_staff.agent.skills.delegation.asyncio.create_task", side_effect=_capture_task),
+        patch("chief_of_staff.agent.subagent_runtime.spawn_sub_agent_run", return_value="run-1234") as spawn_run,
         patch("chief_of_staff.agent.activity.log_activity"),
     ):
         result = await execute(
@@ -41,11 +29,9 @@ async def test_spawn_sub_agent_task_creates_run_and_returns_id():
             {"agent_name": "onboarding", "task": "Draft a welcome packet"},
             "chief_of_staff",
         )
-        if spawned:
-            await asyncio.gather(*spawned)
 
     assert "Spawned sub-agent run" in result
-    create_run.assert_called_once()
+    spawn_run.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -66,14 +52,24 @@ async def test_list_sub_agent_tasks_returns_json():
 async def test_cancel_sub_agent_task_active_task():
     """cancel_sub_agent_task should cancel active in-memory task handles."""
     run_id = "run-active"
-    task = MagicMock()
-    task.done.return_value = False
-    _ACTIVE_SUBAGENT_TASKS[run_id] = task
-
-    with patch("chief_of_staff.knowledge.database.mark_sub_agent_run_cancelled") as mark_cancelled:
+    with patch("chief_of_staff.agent.subagent_runtime.cancel_sub_agent_run", return_value="cancel_requested"):
         result = await execute("cancel_sub_agent_task", {"run_id": run_id}, "chief_of_staff")
 
     assert "Cancellation requested" in result
-    task.cancel.assert_called_once()
-    mark_cancelled.assert_called_once()
+
+
+def test_recover_pending_sub_agent_runs_enqueues_tasks():
+    """Recovery should enqueue queued/running rows that are not already active."""
     _ACTIVE_SUBAGENT_TASKS.clear()
+    queued = [{"id": "run-q", "parent_agent": "chief_of_staff", "child_agent": "onboarding", "task": "task q", "requester_channel": "discord"}]
+    running = [{"id": "run-r", "parent_agent": "chief_of_staff", "child_agent": "onboarding", "task": "task r", "requester_channel": "discord"}]
+
+    with (
+        patch("chief_of_staff.agent.subagent_runtime.list_sub_agent_runs", side_effect=[queued, running]),
+        patch("chief_of_staff.agent.subagent_runtime._run_subagent", return_value=None),
+        patch("chief_of_staff.agent.subagent_runtime.asyncio.create_task") as create_task,
+    ):
+        recovered = recover_pending_sub_agent_runs()
+
+    assert recovered == 2
+    assert create_task.call_count == 2

@@ -72,6 +72,15 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     logger.info("Background scheduler started")
 
+    # Recover queued/running async sub-agent runs after restarts
+    try:
+        from chief_of_staff.agent.subagent_runtime import recover_pending_sub_agent_runs
+        recovered = recover_pending_sub_agent_runs()
+        if recovered:
+            logger.info(f"Recovered {recovered} pending sub-agent run(s)")
+    except Exception as e:
+        logger.error(f"Sub-agent recovery failed: {e}", exc_info=True)
+
     # Start Discord bot if enabled and configured
     if settings.enable_discord_bot:
         from chief_of_staff.communication.discord_bot import start_discord_bot

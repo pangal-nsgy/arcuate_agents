@@ -49,11 +49,11 @@ PYTHONPATH=src uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8000
 │  registry.py  — YAML config loader (agents/*.yaml)          │
 │  router.py    — Multi-agent message routing                 │
 │  memory.py    — Per-agent persistent memory (.md files)      │
-│  activity.py  — Activity tracking (22 types → SQLite)       │
+│  activity.py  — Activity tracking (26 types → SQLite)       │
 │  retry.py     — Exponential backoff for transient failures   │
 │  code_ops.py  — Code self-modification via GitHub REST API   │
 │                                                              │
-│  skills/      — Modular tool collections (7 skill modules)  │
+│  skills/      — Modular tool collections (9 skill modules)  │
 │    knowledge.py      — search_knowledge, list_recent_emails, │
 │                        search_meetings                       │
 │    communication.py  — send_sms, send_email, draft_document  │
@@ -129,7 +129,7 @@ arcuate_agents/
 │   │   ├── tools.py             # Facade → delegates to skill modules
 │   │   ├── registry.py          # YAML config loader (supports tools + skills)
 │   │   ├── router.py            # Multi-agent message routing
-│   │   ├── skills/              # Modular tool collections (7 modules)
+│   │   ├── skills/              # Modular tool collections (9 modules)
 │   │   ├── memory.py, activity.py, retry.py, code_ops.py
 │   │   └── ...
 │   ├── communication/           # Discord (multi-agent routing), SMS, email
@@ -208,7 +208,7 @@ Everything else degrades gracefully — Twilio tools return errors, ingestion sk
 
 ---
 
-## Skills & Tools (7 skills, 17 tools)
+## Skills & Tools (9 skills, 25 tools)
 
 Tools are organized into **skill modules** in `src/chief_of_staff/agent/skills/`. Each skill is a reusable module that any agent can load. The `tools.py` facade delegates to the `SkillRegistry`.
 
@@ -221,6 +221,8 @@ Tools are organized into **skill modules** in `src/chief_of_staff/agent/skills/`
 | `memory` | `skills/memory_skill.py` | `remember`, `recall_memory` |
 | `delegation` | `skills/delegation.py` | `create_sub_agent`, `delegate_task` |
 | `code_ops` | `skills/code_ops_skill.py` | `read_own_code`, `edit_own_code`, `deploy_changes` |
+| `orchestration` | `skills/orchestration.py` | `create_task_plan`, `execute_task_plan`, `scaffold_skill` |
+| `execution` | `skills/execution.py` | `run_python`, `fetch_webpage`, `install_package`, `report_progress` |
 
 Plus `web_search` as a server-side tool (Anthropic built-in, configured in agent YAML).
 
@@ -301,11 +303,11 @@ Trigger words from ALL agents are merged for the bot's `_should_respond()` check
 
 ---
 
-## Activity Tracking (22 action types)
+## Activity Tracking (26 action types)
 
 All activity is logged to the `agent_activity` SQLite table via `log_activity()` in `activity.py`.
 
-**Action types**: `message_received`, `message_sent`, `tool_use`, `knowledge_search`, `web_search`, `config_update`, `memory_write`, `memory_read`, `sub_agent_spawn`, `delegation`, `sms_received`, `sms_sent`, `call_ingested`, `email_ingested`, `doc_ingested`, `meeting_ingested`, `ingestion_sync`, `webhook_received`, `code_read`, `code_edit`, `code_deploy`, `error`
+**Action types**: `message_received`, `message_sent`, `tool_use`, `knowledge_search`, `web_search`, `config_update`, `memory_write`, `memory_read`, `sub_agent_spawn`, `delegation`, `sms_received`, `sms_sent`, `call_ingested`, `email_ingested`, `doc_ingested`, `meeting_ingested`, `ingestion_sync`, `webhook_received`, `code_read`, `code_edit`, `code_deploy`, `python_exec`, `webpage_fetch`, `package_install`, `progress_report`, `error`
 
 **Files that log activity** (if you add a new communication channel, wire it up here):
 - `discord_bot.py` — message_received, message_sent, error
@@ -554,7 +556,7 @@ Push to `dev` OR PR targeting `dev`
 
 - **Multi-agent workforce**: COS (orchestrator) + Onboarding Specialist, with skill-based tool loading
 - **Discord bot**: Single bot, multi-agent routing via @mention / trigger words / default COS
-- **Skills system**: 7 reusable skill modules, 17 tools — agents load skills by name
+- **Skills system**: 9 reusable skill modules, 25 tools — agents load skills by name
 - **Email**: Sends/reads as the agent email via Gmail API
 - **Knowledge base**: 500+ emails, 27 Google Docs, 35+ ElevenLabs transcripts
 - **Code self-modification**: Working — agent can read/edit/deploy via Discord
@@ -562,7 +564,7 @@ Push to `dev` OR PR targeting `dev`
 - **Railway**: Production + staging environments, auto-deploy on push
 - **Staging**: `arcuate-staging-staging.up.railway.app` — watches `dev`, health-checked before prod deploy
 - **CI/CD**: 3-job Guardian pipeline (validate → auto-merge PR → deploy), fully automated
-- **Tests**: 63 tests passing (skills, routing, core loop, tools, retry, errors, linter)
+- **Tests**: 75+ tests passing (skills, routing, core loop, tools, retry, errors, linter, execution)
 - **SMS via Twilio**: Functional but unreliable delivery — Discord preferred
 - **Zoom/Recall.ai**: Code built, credentials not configured (degrades gracefully)
 

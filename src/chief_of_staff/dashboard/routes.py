@@ -292,6 +292,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .action-badge.code_read { background: #1a2633; color: #7dd3fc; }
   .action-badge.code_edit { background: #2a2040; color: #a78bfa; }
   .action-badge.code_deploy { background: #1f3d1f; color: #86efac; }
+  .action-badge.python_exec { background: #2d3a1f; color: #a3e635; }
+  .action-badge.webpage_fetch { background: #0c3547; color: #38bdf8; }
+  .action-badge.package_install { background: #3d2f0a; color: #fbbf24; }
+  .action-badge.progress_report { background: #1a3333; color: #5eead4; }
 
   .sidebar { background: var(--surface); overflow-y: auto; }
   .agent-card {
@@ -463,6 +467,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <option value="code_read">Code Read</option>
           <option value="code_edit">Code Edit</option>
           <option value="code_deploy">Code Deploy</option>
+          <option value="python_exec">Python Exec</option>
+          <option value="webpage_fetch">Webpage Fetch</option>
+          <option value="package_install">Package Install</option>
+          <option value="progress_report">Progress Report</option>
           <option value="error">Error</option>
         </select>
         <select id="filter-hours" onchange="refresh()">

@@ -13,10 +13,10 @@ class TestSkillRegistry:
     """Test the SkillRegistry class."""
 
     def test_loads_all_skill_modules(self):
-        """Registry should auto-load all 8 skill modules."""
+        """Registry should auto-load all 9 skill modules."""
         registry = SkillRegistry()
         registry._ensure_loaded()
-        assert len(registry._skills) == 8
+        assert len(registry._skills) == 9
         assert "knowledge" in registry._skills
         assert "communication" in registry._skills
         assert "meetings" in registry._skills
@@ -25,12 +25,13 @@ class TestSkillRegistry:
         assert "delegation" in registry._skills
         assert "code_ops" in registry._skills
         assert "orchestration" in registry._skills
+        assert "execution" in registry._skills
 
-    def test_all_21_tools_mapped(self):
-        """All 21 tools should be mapped to their skill modules."""
+    def test_all_25_tools_mapped(self):
+        """All 25 tools should be mapped to their skill modules."""
         registry = SkillRegistry()
         registry._ensure_loaded()
-        assert len(registry._tool_map) == 21
+        assert len(registry._tool_map) == 25
         expected = [
             "search_knowledge", "list_recent_emails", "search_meetings",
             "send_sms", "send_email", "draft_document",
@@ -40,6 +41,7 @@ class TestSkillRegistry:
             "create_sub_agent", "delegate_task",
             "read_own_code", "edit_own_code", "deploy_changes",
             "create_task_plan", "execute_task_plan", "scaffold_skill",
+            "run_python", "fetch_webpage", "install_package", "report_progress",
         ]
         for tool in expected:
             assert tool in registry._tool_map, f"Tool '{tool}' not in registry"
@@ -88,10 +90,10 @@ class TestSkillRegistry:
         assert tools.count("search_knowledge") == 1
 
     def test_get_all_tool_definitions(self):
-        """get_all_tool_definitions returns all 21 tools."""
+        """get_all_tool_definitions returns all 25 tools."""
         registry = SkillRegistry()
         all_defs = registry.get_all_tool_definitions()
-        assert len(all_defs) == 21
+        assert len(all_defs) == 25
 
 
 class TestSkillExecution:

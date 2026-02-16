@@ -20,6 +20,11 @@ from chief_of_staff.agent.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
+# Tools that need extended timeouts (run subprocesses, network calls, etc.)
+_LONG_TIMEOUT_TOOLS = {"run_python", "install_package", "execute_task_plan", "fetch_webpage"}
+_LONG_TIMEOUT = 120
+_DEFAULT_TOOL_TIMEOUT = 30
+
 
 class Agent:
     """A configurable agent that loads behavior from YAML config."""
@@ -144,7 +149,8 @@ class Agent:
                 tool_start = time.time()
                 logger.info(f"[{self.config.name}] Tool: {tool_call.name}({tool_call.input})")
 
-                # Per-tool timeout (30s)
+                # Per-tool timeout (extended for long-running tools)
+                tool_timeout = _LONG_TIMEOUT if tool_call.name in _LONG_TIMEOUT_TOOLS else _DEFAULT_TOOL_TIMEOUT
                 try:
                     result = await asyncio.wait_for(
                         execute_tool(
@@ -152,10 +158,10 @@ class Agent:
                             tool_call.input,
                             agent_name=self.config.name,
                         ),
-                        timeout=30,
+                        timeout=tool_timeout,
                     )
                 except asyncio.TimeoutError:
-                    result = f"Tool '{tool_call.name}' timed out after 30s."
+                    result = f"Tool '{tool_call.name}' timed out after {tool_timeout}s."
                     logger.warning(result)
 
                 tool_duration = int((time.time() - tool_start) * 1000)

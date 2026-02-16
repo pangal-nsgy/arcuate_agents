@@ -65,6 +65,11 @@ WEBHOOK_RECEIVED = "webhook_received"
 CODE_READ = "code_read"
 CODE_EDIT = "code_edit"
 CODE_DEPLOY = "code_deploy"
+# Execution
+PYTHON_EXEC = "python_exec"
+WEBPAGE_FETCH = "webpage_fetch"
+PACKAGE_INSTALL = "package_install"
+PROGRESS_REPORT = "progress_report"
 
 
 def init_activity_tables() -> None:
@@ -230,6 +235,10 @@ def get_activity_stats(hours: int = 24) -> dict[str, Any]:
         "code_reads": by_type.get(CODE_READ, 0),
         "code_edits": by_type.get(CODE_EDIT, 0),
         "code_deploys": by_type.get(CODE_DEPLOY, 0),
+        "python_execs": by_type.get(PYTHON_EXEC, 0),
+        "webpage_fetches": by_type.get(WEBPAGE_FETCH, 0),
+        "package_installs": by_type.get(PACKAGE_INSTALL, 0),
+        "progress_reports": by_type.get(PROGRESS_REPORT, 0),
         "active_agents": [r["agent_name"] for r in agents],
         "by_type": by_type,
     }

@@ -12,6 +12,18 @@
 
 - date: "2026-02-15"
   author: dhiraj + claude
+  category: tools
+  title: "Autonomous execution layer — run_python, fetch_webpage, install_package, report_progress"
+  details: >
+    New execution skill with 4 tools enabling the agent to write and run Python code,
+    scrape websites, install packages on demand, and report progress during multi-step tasks.
+    Subprocess execution is sandboxed: secrets stripped from env, fresh temp working dir,
+    120s max timeout. System prompt expanded with autonomous execution patterns.
+    Agent max_iterations increased to 25, request_timeout to 300s, web_search max_uses to 5.
+    Per-tool timeouts in core.py: 120s for long-running tools, 30s for standard tools.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
   category: deployment
   title: "Guardian v4: staging environment, PR auto-merge, build validation"
   details: >

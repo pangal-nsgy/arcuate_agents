@@ -212,27 +212,18 @@ class Agent:
         Wraps _respond_inner with an overall request timeout.
         """
         timeout = self.config.request_timeout
-        token = None
         try:
-            token = set_request_context(
-                channel=channel, user_id=user_id, session_id=session_id,
-                progress_callback=progress_callback,
-            )
             result = await asyncio.wait_for(
                 run_main_lane(
-                    self._respond_inner(user_message, conversation_history, channel, user_id, session_id)
+                    self._respond_inner(
+                        user_message, conversation_history,
+                        channel, user_id, session_id, progress_callback,
+                    )
                 ),
                 timeout=timeout,
             )
-            if token is not None:
-                reset_request_context(token)
             return result
         except asyncio.TimeoutError:
-            try:
-                if token is not None:
-                    reset_request_context(token)
-            except Exception:
-                pass
             log_activity(
                 agent_name=self.config.name,
                 action_type=ERROR,
@@ -242,14 +233,6 @@ class Agent:
                 session_id=session_id,
             )
             return "I took too long on that one. Try breaking the request into smaller parts."
-        except Exception:
-            # Ensure request context is reset on non-timeout failures as well.
-            try:
-                if token is not None:
-                    reset_request_context(token)
-            except Exception:
-                pass
-            raise
 
     async def _respond_inner(
         self,
@@ -258,8 +241,31 @@ class Agent:
         channel: str = "",
         user_id: str = "",
         session_id: str = "",
+        progress_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """Core agent loop — handles multi-turn tool use, logs all activity."""
+        # Set request context HERE (inside the Task) so ContextVar is definitely
+        # available to all tool calls, emit_progress, etc.
+        token = set_request_context(
+            channel=channel, user_id=user_id, session_id=session_id,
+            progress_callback=progress_callback,
+        )
+        try:
+            return await self._respond_loop(
+                user_message, conversation_history, channel, user_id, session_id,
+            )
+        finally:
+            reset_request_context(token)
+
+    async def _respond_loop(
+        self,
+        user_message: str,
+        conversation_history: list[dict[str, Any]] | None = None,
+        channel: str = "",
+        user_id: str = "",
+        session_id: str = "",
+    ) -> str:
+        """Inner loop — tool planning, agentic execution, overflow."""
         self.reload_config()
 
         messages = list(conversation_history or [])

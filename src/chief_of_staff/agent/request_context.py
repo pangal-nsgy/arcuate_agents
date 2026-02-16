@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 # Minimum interval between progress messages to avoid flooding Discord
@@ -62,12 +65,15 @@ async def emit_progress(message: str) -> None:
     """
     ctx = get_request_context()
     if not ctx.progress_callback:
+        logger.debug("emit_progress: no callback set, skipping: %s", message)
         return
     now = time.time()
     if now - ctx._last_progress_time < _PROGRESS_MIN_INTERVAL:
+        logger.debug("emit_progress: throttled, skipping: %s", message)
         return
     ctx._last_progress_time = now
     try:
+        logger.info("emit_progress: sending: %s", message)
         await ctx.progress_callback(message)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("emit_progress: callback failed: %s", e)

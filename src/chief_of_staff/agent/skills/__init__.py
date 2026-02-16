@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import importlib
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# All skill module names (relative to this package)
-_SKILL_MODULES = [
-    "knowledge",
-    "communication",
-    "meetings",
-    "self_mod",
-    "memory_skill",
-    "delegation",
-    "code_ops_skill",
-]
+def _discover_skill_modules() -> list[str]:
+    """Discover skill modules from files in this package."""
+    skills_dir = Path(__file__).resolve().parent
+    modules = []
+    for path in sorted(skills_dir.glob("*.py")):
+        if path.name == "__init__.py" or path.name.startswith("_"):
+            continue
+        modules.append(path.stem)
+    return modules
 
 
 class SkillRegistry:
@@ -32,13 +32,21 @@ class SkillRegistry:
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
-        for mod_name in _SKILL_MODULES:
+        for mod_name in _discover_skill_modules():
             try:
                 module = importlib.import_module(f".{mod_name}", package=__package__)
                 self.register(module)
             except Exception as e:
                 logger.error(f"Failed to load skill module '{mod_name}': {e}")
         self._loaded = True
+
+    def reload(self) -> None:
+        """Reload all skill modules from disk."""
+        self._skills.clear()
+        self._tool_map.clear()
+        self._tool_defs.clear()
+        self._loaded = False
+        self._ensure_loaded()
 
     def register(self, module: Any) -> None:
         """Register a skill module (must have SKILL_NAME, TOOL_DEFINITIONS, execute)."""
@@ -87,6 +95,10 @@ class SkillRegistry:
         """Dispatch a tool call to the appropriate skill module."""
         self._ensure_loaded()
         module = self._tool_map.get(name)
+        if module is None:
+            # If a new skill file was created at runtime, try one reload pass.
+            self.reload()
+            module = self._tool_map.get(name)
         if module is None:
             return f"Unknown tool: {name}"
         return await module.execute(name, args, agent_name)

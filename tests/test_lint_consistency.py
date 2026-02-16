@@ -34,8 +34,8 @@ class TestToolsConsistency:
         skills_dir = REPO_ROOT / "src" / "chief_of_staff" / "agent" / "skills"
         assert skills_dir.is_dir(), f"skills/ not found at {skills_dir}"
 
-    def test_all_17_tools_defined(self):
-        """Verify the expected 17 tools are defined across skill modules."""
+    def test_all_20_tools_defined(self):
+        """Verify the expected 20 tools are defined across skill modules."""
         tool_names = _get_defined_tool_names()
         expected_tools = [
             "search_knowledge", "send_sms", "send_email", "draft_document",
@@ -43,16 +43,17 @@ class TestToolsConsistency:
             "update_own_instructions", "update_system_prompt", "update_triage_config",
             "remember", "recall_memory", "create_sub_agent", "delegate_task",
             "read_own_code", "edit_own_code", "deploy_changes",
+            "create_task_plan", "execute_task_plan", "scaffold_skill",
         ]
         for tool in expected_tools:
             assert tool in tool_names, f"Tool '{tool}' not found in skill modules"
 
-    def test_all_7_skills_defined(self):
-        """Verify the expected 7 skills are defined."""
+    def test_all_8_skills_defined(self):
+        """Verify the expected 8 skills are defined."""
         skill_names = _get_defined_skill_names()
         expected_skills = [
             "knowledge", "communication", "meetings", "self_mod",
-            "memory", "delegation", "code_ops",
+            "memory", "delegation", "code_ops", "orchestration",
         ]
         for skill in expected_skills:
             assert skill in skill_names, f"Skill '{skill}' not found in skill modules"

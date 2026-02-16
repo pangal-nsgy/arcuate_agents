@@ -7,6 +7,7 @@ or multi-step reasoning (e.g., "create onboarding packet for Dr. Smith").
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,8 @@ class TaskStep:
     """A single step in a task plan."""
 
     description: str
+    agent_name: str = "chief_of_staff"
+    required_skill: str = ""
     tool_name: str | None = None
     tool_args: dict | None = None
     depends_on: list[int] = field(default_factory=list)
@@ -29,11 +32,14 @@ class TaskPlan:
     """A multi-step plan for accomplishing a complex request."""
 
     goal: str
+    plan_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     steps: list[TaskStep] = field(default_factory=list)
 
     def add_step(
         self,
         description: str,
+        agent_name: str = "chief_of_staff",
+        required_skill: str = "",
         tool_name: str | None = None,
         tool_args: dict | None = None,
         depends_on: list[int] | None = None,
@@ -41,6 +47,8 @@ class TaskPlan:
         """Add a step to the plan. Returns the step index."""
         step = TaskStep(
             description=description,
+            agent_name=agent_name,
+            required_skill=required_skill,
             tool_name=tool_name,
             tool_args=tool_args,
             depends_on=depends_on or [],
@@ -67,8 +75,13 @@ class TaskPlan:
 
     @property
     def summary(self) -> str:
-        lines = [f"Plan: {self.goal}"]
+        lines = [f"Plan {self.plan_id[:8]}: {self.goal}"]
         for i, step in enumerate(self.steps):
             status_icon = {"pending": " ", "running": ">", "completed": "x", "failed": "!"}
-            lines.append(f"  [{status_icon.get(step.status, '?')}] {i+1}. {step.description}")
+            tool_hint = f" [{step.tool_name}]" if step.tool_name else ""
+            skill_hint = f" (needs skill: {step.required_skill})" if step.required_skill else ""
+            lines.append(
+                f"  [{status_icon.get(step.status, '?')}] {i+1}. "
+                f"{step.description} -> {step.agent_name}{tool_hint}{skill_hint}"
+            )
         return "\n".join(lines)

@@ -57,10 +57,12 @@ system_prompt: |
 
 skills:
   - knowledge
+  - communication
   - memory
   - delegation
   - self_mod
   - code_ops
+  - orchestration
 
 server_tools:
   - type: web_search_20250305

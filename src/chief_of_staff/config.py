@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
+    main_agent_max_concurrency: int = 16
+    subagent_max_concurrency: int = 4
+    subagent_announce_channel: str = "chief-of-staff"
 
     # Knowledge store
     chroma_persist_dir: str = "./chroma_data"

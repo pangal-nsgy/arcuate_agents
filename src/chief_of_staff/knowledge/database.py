@@ -95,6 +95,24 @@ CREATE TABLE IF NOT EXISTS scheduled_actions (
     next_run_at TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sub_agent_runs (
+    id TEXT PRIMARY KEY,
+    parent_agent TEXT NOT NULL,
+    child_agent TEXT NOT NULL,
+    task TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',  -- queued, running, completed, failed, cancelled
+    result TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    requester_channel TEXT DEFAULT '',
+    requester_user_id TEXT DEFAULT '',
+    requester_session_id TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    started_at TEXT DEFAULT '',
+    ended_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_sub_agent_runs_parent_created ON sub_agent_runs(parent_agent, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sub_agent_runs_status ON sub_agent_runs(status);
 """
 
 
@@ -400,3 +418,103 @@ def _compute_next_run(schedule_type: str, schedule_time: str, after_iso: str) ->
         return candidate.isoformat()
 
     return after.isoformat()
+
+
+def create_sub_agent_run(
+    run_id: str,
+    parent_agent: str,
+    child_agent: str,
+    task: str,
+    requester_channel: str = "",
+    requester_user_id: str = "",
+    requester_session_id: str = "",
+) -> None:
+    """Create a new durable sub-agent run record."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            """INSERT INTO sub_agent_runs
+            (id, parent_agent, child_agent, task, status, requester_channel, requester_user_id, requester_session_id, created_at)
+            VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)""",
+            (
+                run_id,
+                parent_agent,
+                child_agent,
+                task,
+                requester_channel,
+                requester_user_id,
+                requester_session_id,
+                now,
+            ),
+        )
+
+
+def mark_sub_agent_run_running(run_id: str) -> None:
+    """Mark a sub-agent run as running."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE sub_agent_runs SET status = 'running', started_at = ? WHERE id = ?",
+            (now, run_id),
+        )
+
+
+def mark_sub_agent_run_completed(run_id: str, result: str) -> None:
+    """Mark a sub-agent run as completed."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE sub_agent_runs SET status = 'completed', result = ?, ended_at = ? WHERE id = ?",
+            (result[:8000], now, run_id),
+        )
+
+
+def mark_sub_agent_run_failed(run_id: str, error: str) -> None:
+    """Mark a sub-agent run as failed."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE sub_agent_runs SET status = 'failed', error = ?, ended_at = ? WHERE id = ?",
+            (error[:4000], now, run_id),
+        )
+
+
+def mark_sub_agent_run_cancelled(run_id: str, reason: str = "") -> None:
+    """Mark a sub-agent run as cancelled."""
+    now = datetime.utcnow().isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE sub_agent_runs SET status = 'cancelled', error = ?, ended_at = ? WHERE id = ?",
+            (reason[:4000], now, run_id),
+        )
+
+
+def get_sub_agent_run(run_id: str) -> dict[str, Any] | None:
+    """Get a sub-agent run by ID."""
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM sub_agent_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_sub_agent_runs(
+    parent_agent: str = "",
+    status: str = "",
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """List sub-agent runs with optional filters."""
+    query = "SELECT * FROM sub_agent_runs WHERE 1=1"
+    params: list[Any] = []
+    if parent_agent:
+        query += " AND parent_agent = ?"
+        params.append(parent_agent)
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    with _get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [dict(r) for r in rows]

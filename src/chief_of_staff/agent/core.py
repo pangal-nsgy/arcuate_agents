@@ -25,6 +25,8 @@ from chief_of_staff.agent.activity import (
 from chief_of_staff.agent.registry import AgentConfig, get_registry
 from chief_of_staff.agent.tools import get_tool_definitions, get_server_tools, execute_tool
 from chief_of_staff.agent.retry import retry_async
+from chief_of_staff.agent.lanes import run_main_lane
+from chief_of_staff.agent.request_context import set_request_context, reset_request_context
 
 logger = logging.getLogger(__name__)
 
@@ -152,12 +154,24 @@ class Agent:
         Wraps _respond_inner with an overall request timeout.
         """
         timeout = self.config.request_timeout
+        token = None
         try:
-            return await asyncio.wait_for(
-                self._respond_inner(user_message, conversation_history, channel, user_id, session_id),
+            token = set_request_context(channel=channel, user_id=user_id, session_id=session_id)
+            result = await asyncio.wait_for(
+                run_main_lane(
+                    self._respond_inner(user_message, conversation_history, channel, user_id, session_id)
+                ),
                 timeout=timeout,
             )
+            if token is not None:
+                reset_request_context(token)
+            return result
         except asyncio.TimeoutError:
+            try:
+                if token is not None:
+                    reset_request_context(token)
+            except Exception:
+                pass
             log_activity(
                 agent_name=self.config.name,
                 action_type=ERROR,
@@ -167,6 +181,14 @@ class Agent:
                 session_id=session_id,
             )
             return "I took too long on that one. Try breaking the request into smaller parts."
+        except Exception:
+            # Ensure request context is reset on non-timeout failures as well.
+            try:
+                if token is not None:
+                    reset_request_context(token)
+            except Exception:
+                pass
+            raise
 
     async def _respond_inner(
         self,

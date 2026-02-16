@@ -13,6 +13,19 @@
 - date: "2026-02-15"
   author: dhiraj + claude
   category: modules
+  title: "Live Progress Streaming — real-time status updates to Discord"
+  details: >
+    Progress callback flows from Discord → RequestContext → core.py → tools.
+    At key points (tool planning, each tool call, delegation, overflow), short
+    status messages stream to the Discord channel in real time instead of silent
+    waiting. Throttled to 1 message per 2 seconds to avoid flooding. The
+    report_progress tool also forwards to Discord. Sub-agent delegation inherits
+    the callback so delegated work streams progress too. Non-Discord channels
+    (API, SMS) unaffected — callback is simply None.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
+  category: modules
   title: "Layered Intelligence — Tool Planner + Opus Primary + OpenAI Overflow"
   details: >
     3-layer architecture in core.py: (1) Haiku tool planner pre-selects 5-12 relevant

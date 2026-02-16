@@ -22,6 +22,19 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                     "items": {"type": "string"},
                     "description": "Tools the sub-agent can use",
                 },
+                "skills": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Skills (or tool names) the sub-agent can use. Defaults to full capability profile.",
+                },
+                "permissions": {
+                    "type": "object",
+                    "description": "Optional permission overrides (e.g. can_modify_code, can_create_agents, max_delegation_depth).",
+                },
+                "tool_policy": {
+                    "type": "object",
+                    "description": "Optional allow/deny tool policy, e.g. {\"allow\": [\"search_*\"], \"deny\": [\"deploy_changes\"]}.",
+                },
             },
             "required": ["name", "display_name", "system_prompt"],
         },
@@ -103,7 +116,10 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
             name=args["name"],
             display_name=args["display_name"],
             system_prompt=args["system_prompt"],
-            tools=args.get("tools", ["search_knowledge"]),
+            tools=args.get("tools", []),
+            skills=args.get("skills"),
+            permissions=args.get("permissions"),
+            tool_policy=args.get("tool_policy"),
         )
 
         log_activity(
@@ -112,12 +128,16 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
             action_detail=f"Created sub-agent: {new_agent.name}",
             metadata={"sub_agent": new_agent.name, "tools": new_agent.tools},
         )
-        return f"Sub-agent '{new_agent.display_name}' created with tools: {new_agent.tools}"
+        return (
+            f"Sub-agent '{new_agent.display_name}' created. "
+            f"skills={new_agent.skills}, tools={new_agent.tools}, permissions={new_agent.permissions}"
+        )
 
     if name == "delegate_task":
         from chief_of_staff.agent.activity import log_activity, DELEGATION
         from chief_of_staff.agent.core import get_agent_by_name
         from chief_of_staff.agent.delegation_context import enter_delegation, exit_delegation
+        from chief_of_staff.agent.request_context import emit_progress, get_request_context
 
         target_name = args["agent_name"]
         task = args["task"]
@@ -132,6 +152,14 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
         if not sub_agent:
             return f"Error: sub-agent '{target_name}' not found."
 
+        # Emit progress and propagate the callback to the sub-agent
+        display_name = sub_agent.config.display_name or target_name
+        await emit_progress(f"Delegating to {display_name}...")
+
+        # Inherit progress callback so sub-agent updates stream to the same channel
+        ctx = get_request_context()
+        parent_callback = ctx.progress_callback
+
         log_activity(
             agent_name=agent_name,
             action_type=DELEGATION,
@@ -145,6 +173,7 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
                 user_message=task,
                 channel="delegation",
                 user_id=agent_name,
+                progress_callback=parent_callback,
             )
             return f"[{target_name} response]:\n{result}"
         except Exception as e:

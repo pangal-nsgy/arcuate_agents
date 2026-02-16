@@ -174,7 +174,7 @@ class TestReportProgress:
     @pytest.mark.asyncio
     async def test_basic_progress(self):
         result = await execute("report_progress", {"status": "Processing data..."}, "test")
-        assert "Progress logged" in result
+        assert "Progress reported" in result
         assert "Processing data" in result
 
     @pytest.mark.asyncio

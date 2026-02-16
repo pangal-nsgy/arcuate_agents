@@ -39,7 +39,13 @@ system_prompt: |
 skills:
   - knowledge
   - communication
+  - meetings
   - memory
+  - delegation
+  - self_mod
+  - code_ops
+  - orchestration
+  - execution
 
 trigger_words:
   - onboarding
@@ -48,10 +54,11 @@ trigger_words:
   - onboarding checklist
 
 permissions:
-  can_self_modify: false
-  can_create_agents: false
+  can_self_modify: true
+  can_create_agents: true
   can_send_external: true
-  can_modify_code: false
+  can_modify_code: true
+  max_delegation_depth: 3
 
 standing_instructions: []
 

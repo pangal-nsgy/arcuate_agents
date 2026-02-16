@@ -158,7 +158,7 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
     elif name == "install_package":
         return await _install_package(args, agent_name)
     elif name == "report_progress":
-        return _report_progress(args, agent_name)
+        return await _report_progress(args, agent_name)
     else:
         raise ValueError(f"Unknown execution tool: {name}")
 
@@ -346,9 +346,10 @@ async def _install_package(args: dict[str, Any], agent_name: str) -> str:
         return f"Failed to install {package}.\n{stderr[:2000]}" if stderr else f"Failed to install {package} (exit code {returncode})."
 
 
-def _report_progress(args: dict[str, Any], agent_name: str) -> str:
-    """Log a progress update."""
+async def _report_progress(args: dict[str, Any], agent_name: str) -> str:
+    """Log a progress update and forward it to Discord via emit_progress."""
     from chief_of_staff.agent.activity import log_activity, PROGRESS_REPORT
+    from chief_of_staff.agent.request_context import emit_progress
 
     status = args["status"]
     step = args.get("step")
@@ -365,4 +366,6 @@ def _report_progress(args: dict[str, Any], agent_name: str) -> str:
         output_summary=status,
     )
 
-    return f"Progress logged: {detail}"
+    await emit_progress(detail)
+
+    return f"Progress reported: {detail}"

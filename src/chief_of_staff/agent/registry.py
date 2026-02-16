@@ -15,6 +15,27 @@ logger = logging.getLogger(__name__)
 
 AGENTS_DIR = Path(os.environ.get("AGENTS_DIR", "./agents"))
 
+# Default "agentic army" capability profile for newly created agents.
+DEFAULT_AGENT_SKILLS = [
+    "knowledge",
+    "communication",
+    "meetings",
+    "memory",
+    "delegation",
+    "self_mod",
+    "code_ops",
+    "orchestration",
+    "execution",
+]
+
+DEFAULT_AGENT_PERMISSIONS: dict[str, Any] = {
+    "can_self_modify": True,
+    "can_create_agents": True,
+    "can_send_external": True,
+    "can_modify_code": True,
+    "max_delegation_depth": 3,
+}
+
 
 @dataclass
 class AgentConfig:
@@ -194,16 +215,26 @@ class AgentRegistry:
         display_name: str,
         system_prompt: str,
         tools: list[str] | None = None,
+        skills: list[str] | None = None,
+        permissions: dict[str, Any] | None = None,
+        tool_policy: dict[str, list[str]] | None = None,
         model: str = "claude-sonnet-4-5-20250929",
     ) -> AgentConfig:
         """Create a new agent and save its config."""
+        resolved_skills = list(skills) if skills else list(DEFAULT_AGENT_SKILLS)
+        resolved_permissions = dict(DEFAULT_AGENT_PERMISSIONS)
+        if permissions:
+            resolved_permissions.update(permissions)
+
         config = AgentConfig(
             name=name,
             display_name=display_name,
             model=model,
             system_prompt=system_prompt,
-            tools=tools or ["search_knowledge"],
-            permissions={"can_self_modify": False, "can_create_agents": False, "can_send_external": False},
+            tools=tools or [],
+            skills=resolved_skills,
+            permissions=resolved_permissions,
+            tool_policy=tool_policy or {},
         )
         path = AGENTS_DIR / f"{name}.yaml"
         config.to_yaml(path)

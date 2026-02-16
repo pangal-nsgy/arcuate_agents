@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anthropic
@@ -27,7 +28,9 @@ from chief_of_staff.agent.registry import AgentConfig, get_registry
 from chief_of_staff.agent.tools import get_tool_definitions, get_server_tools, execute_tool
 from chief_of_staff.agent.retry import retry_async
 from chief_of_staff.agent.lanes import run_main_lane
-from chief_of_staff.agent.request_context import set_request_context, reset_request_context
+from chief_of_staff.agent.request_context import (
+    set_request_context, reset_request_context, emit_progress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,33 @@ _CAPABILITY_REFUSAL_PATTERNS = (
     r"\bno tool\b",
     r"\bmissing capability\b",
 )
+
+
+# Human-friendly names for progress messages
+_TOOL_DISPLAY_NAMES = {
+    "search_knowledge": "Searching knowledge base",
+    "list_recent_emails": "Checking recent emails",
+    "search_meetings": "Searching meetings",
+    "send_email": "Sending email",
+    "send_sms": "Sending SMS",
+    "draft_document": "Drafting document",
+    "send_meeting_bot": "Sending meeting bot",
+    "delegate_task": "Delegating to specialist",
+    "spawn_sub_agent_task": "Spawning sub-agent task",
+    "create_sub_agent": "Creating sub-agent",
+    "run_python": "Running code",
+    "fetch_webpage": "Fetching webpage",
+    "install_package": "Installing package",
+    "remember": "Saving to memory",
+    "recall_memory": "Recalling memory",
+    "update_own_instructions": "Updating instructions",
+    "read_own_code": "Reading source code",
+    "edit_own_code": "Editing source code",
+    "deploy_changes": "Deploying changes",
+    "create_task_plan": "Creating task plan",
+    "execute_task_plan": "Executing task plan",
+    "scaffold_skill": "Scaffolding new skill",
+}
 
 
 def _looks_like_capability_refusal(text: str) -> bool:
@@ -173,6 +203,7 @@ class Agent:
         channel: str = "",
         user_id: str = "",
         session_id: str = "",
+        progress_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message and return the agent's response.
 
@@ -181,7 +212,10 @@ class Agent:
         timeout = self.config.request_timeout
         token = None
         try:
-            token = set_request_context(channel=channel, user_id=user_id, session_id=session_id)
+            token = set_request_context(
+                channel=channel, user_id=user_id, session_id=session_id,
+                progress_callback=progress_callback,
+            )
             result = await asyncio.wait_for(
                 run_main_lane(
                     self._respond_inner(user_message, conversation_history, channel, user_id, session_id)
@@ -254,8 +288,11 @@ class Agent:
         server_tools = get_server_tools(self.config.server_tools)
 
         # Layer 1: Tool Planner — select relevant tools
+        await emit_progress("Planning approach...")
         planned_tool_names = await self._plan_tools(user_message, all_tool_names, all_tool_defs)
         tool_defs = get_tool_definitions(planned_tool_names)
+        if len(planned_tool_names) < len(all_tool_names):
+            await emit_progress(f"Selected {len(planned_tool_names)} tools, starting work...")
 
         # Layer 2: Agentic loop (Anthropic executor)
         start_time = time.time()
@@ -322,6 +359,10 @@ class Agent:
                 tool_start = time.time()
                 logger.info(f"[{self.config.name}] Tool: {tool_call.name}({tool_call.input})")
 
+                # Emit progress for this tool call
+                display = _TOOL_DISPLAY_NAMES.get(tool_call.name, tool_call.name.replace("_", " ").title())
+                await emit_progress(f"{display}...")
+
                 # Per-tool timeout (extended for long-running tools)
                 tool_timeout = _LONG_TIMEOUT if tool_call.name in _LONG_TIMEOUT_TOOLS else _DEFAULT_TOOL_TIMEOUT
                 try:
@@ -361,6 +402,7 @@ class Agent:
 
         # Layer 3: OpenAI overflow — continue with GPT-4.1 if enabled
         if settings.overflow_enabled and settings.openai_api_key:
+            await emit_progress("Switching to extended reasoning...")
             logger.info(
                 f"[{self.config.name}] Anthropic exhausted {self.config.max_iterations} iterations, "
                 f"switching to OpenAI overflow ({self.config.overflow_model})"

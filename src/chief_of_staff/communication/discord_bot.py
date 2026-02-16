@@ -181,6 +181,13 @@ class ChiefOfStaffBot(discord.Client):
             metadata={"channel_name": channel_name, "is_dm": is_dm, "is_mention": is_mentioned},
         )
 
+        # Build a progress callback that sends intermediate messages to the channel
+        async def _progress(msg: str) -> None:
+            try:
+                await message.channel.send(msg)
+            except Exception:
+                pass
+
         # Show typing indicator while processing
         async with message.channel.typing():
             try:
@@ -193,6 +200,7 @@ class ChiefOfStaffBot(discord.Client):
                     conversation_history=history,
                     channel="discord",
                     user_id=f"discord:{message.author.id}",
+                    progress_callback=_progress,
                 )
 
                 # Log outgoing response

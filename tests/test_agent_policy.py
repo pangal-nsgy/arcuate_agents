@@ -77,7 +77,10 @@ async def test_delegate_task_within_depth_calls_sub_agent():
         permissions={"max_delegation_depth": 2},
     )
     fake_registry = SimpleNamespace(get=lambda name: caller_config)
-    sub_agent = SimpleNamespace(respond=AsyncMock(return_value="done"))
+    sub_agent = SimpleNamespace(
+        respond=AsyncMock(return_value="done"),
+        config=SimpleNamespace(display_name="Onboarding Specialist"),
+    )
 
     with (
         patch("chief_of_staff.agent.registry.get_registry", return_value=fake_registry),

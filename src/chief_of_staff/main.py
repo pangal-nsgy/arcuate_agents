@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -179,20 +180,51 @@ async def trigger_email_ingestion(max_results: int = 100, query: str = ""):
 
 
 @app.post("/api/ingest/docs")
-async def trigger_docs_ingestion(folder_id: str | None = None, max_results: int = 50):
+async def trigger_docs_ingestion(
+    folder_id: str | None = None,
+    max_results: int = 50,
+    async_mode: bool = True,
+):
     """Manually trigger Google Docs ingestion."""
     from chief_of_staff.ingestion.gdocs import fetch_and_ingest_docs
 
-    count = fetch_and_ingest_docs(folder_id=folder_id, max_results=max_results)
+    if async_mode:
+        async def _job():
+            try:
+                loop = asyncio.get_event_loop()
+                count = await loop.run_in_executor(
+                    None,
+                    lambda: fetch_and_ingest_docs(folder_id=folder_id, max_results=max_results),
+                )
+                logger.info(f"Background docs ingestion completed: {count} docs")
+            except Exception as e:
+                logger.error(f"Background docs ingestion failed: {e}", exc_info=True)
+
+        asyncio.create_task(_job())
+        return {
+            "status": "accepted",
+            "message": "Docs ingestion started in background.",
+            "max_results": max_results,
+            "folder_id": folder_id or "",
+        }
+
+    loop = asyncio.get_event_loop()
+    count = await loop.run_in_executor(
+        None,
+        lambda: fetch_and_ingest_docs(folder_id=folder_id, max_results=max_results),
+    )
     return {"docs_ingested": count}
 
 
 @app.get("/api/ingest/docs/debug")
-async def debug_docs_ingestion(max_results: int = 20):
+async def debug_docs_ingestion(max_results: int = 20, run_ingest: bool = False, write: bool = False):
     """Inspect Google Drive visibility for the current OAuth token."""
-    from chief_of_staff.ingestion.gdocs import debug_drive_visibility
+    from chief_of_staff.ingestion.gdocs import debug_drive_visibility, diagnose_docs_ingestion
 
-    return debug_drive_visibility(max_results=max_results)
+    out = debug_drive_visibility(max_results=max_results)
+    if run_ingest:
+        out["ingest_diagnostics"] = diagnose_docs_ingestion(max_results=max_results, write=write)
+    return out
 
 
 @app.post("/api/ingest/transcripts")

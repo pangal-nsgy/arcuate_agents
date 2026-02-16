@@ -58,6 +58,73 @@ def fetch_and_ingest_docs(folder_id: str | None = None, max_results: int = 50) -
     return count
 
 
+def diagnose_docs_ingestion(max_results: int = 10, write: bool = False) -> dict[str, Any]:
+    """Run per-document diagnostics for Google Docs ingestion.
+
+    Args:
+        max_results: How many candidate docs to test.
+        write: If true, actually ingest into KB; if false, only fetch/validate.
+    """
+    drive = get_drive_service()
+    docs = get_docs_service()
+    files = _list_docs_from_drive(drive=drive, folder_id=None, max_results=max_results)
+
+    checks: list[dict[str, Any]] = []
+    success = 0
+    failed = 0
+
+    for file in files:
+        file_id = file.get("id", "")
+        name = file.get("name", "")
+        try:
+            content = _fetch_doc_text(file_id=file_id, docs=docs, drive=drive)
+            if not content.strip():
+                raise ValueError("Document content is empty")
+
+            if write:
+                ingest(
+                    source="gdocs",
+                    source_id=file_id,
+                    title=name,
+                    content=content,
+                    metadata={
+                        "doc_id": file_id,
+                        "modified": file.get("modifiedTime", ""),
+                        "owners": [o.get("displayName", "") for o in file.get("owners", [])],
+                    },
+                )
+
+            checks.append(
+                {
+                    "id": file_id,
+                    "name": name,
+                    "ok": True,
+                    "content_len": len(content),
+                    "write": write,
+                }
+            )
+            success += 1
+        except Exception as e:
+            checks.append(
+                {
+                    "id": file_id,
+                    "name": name,
+                    "ok": False,
+                    "error": f"{type(e).__name__}: {e}",
+                    "write": write,
+                }
+            )
+            failed += 1
+
+    return {
+        "tested": len(files),
+        "success": success,
+        "failed": failed,
+        "write": write,
+        "checks": checks,
+    }
+
+
 def _fetch_doc_text(file_id: str, docs: Any, drive: Any) -> str:
     """Fetch Google Doc text, with Drive export fallback for shared-drive edge cases."""
     # Primary path: Google Docs API

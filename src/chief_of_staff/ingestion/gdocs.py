@@ -171,6 +171,30 @@ def debug_drive_visibility(max_results: int = 20) -> dict[str, Any]:
         for f in all_docs[:10]
     ]
 
+    docs = get_docs_service()
+    fetch_checks: list[dict[str, Any]] = []
+    for f in all_docs[:5]:
+        file_id = f.get("id", "")
+        try:
+            text = _fetch_doc_text(file_id=file_id, docs=docs, drive=drive)
+            fetch_checks.append(
+                {
+                    "id": file_id,
+                    "name": f.get("name", ""),
+                    "ok": True,
+                    "content_len": len(text or ""),
+                }
+            )
+        except Exception as e:
+            fetch_checks.append(
+                {
+                    "id": file_id,
+                    "name": f.get("name", ""),
+                    "ok": False,
+                    "error": f"{type(e).__name__}: {e}",
+                }
+            )
+
     return {
         "account": account,
         "shared_drive_count": len(shared_drive_ids),
@@ -178,6 +202,7 @@ def debug_drive_visibility(max_results: int = 20) -> dict[str, Any]:
         "all_drives_doc_count": len(all_docs),
         "shared_with_me_doc_count": len(shared_with_me_docs),
         "sample_docs": sample,
+        "fetch_checks": fetch_checks,
     }
 
 

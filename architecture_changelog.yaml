@@ -12,6 +12,19 @@
 
 - date: "2026-02-15"
   author: dhiraj + claude
+  category: modules
+  title: "Layered Intelligence — Tool Planner + Opus Primary + OpenAI Overflow"
+  details: >
+    3-layer architecture in core.py: (1) Haiku tool planner pre-selects 5-12 relevant
+    tools from 27+ to reduce attention scatter, (2) Opus replaces Sonnet as primary
+    executor for better multi-tool reasoning, (3) GPT-4.1 overflow continues when
+    Anthropic exhausts max_iterations. New openai_adapter.py handles format conversion.
+    Always-available meta-tools (report_progress, remember, recall_memory) bypass planner.
+    New activity types: tool_planning, overflow_response. OpenAI dependency optional —
+    overflow disabled if OPENAI_API_KEY not set.
+
+- date: "2026-02-15"
+  author: dhiraj + claude
   category: tools
   title: "Autonomous execution layer — run_python, fetch_webpage, install_package, report_progress"
   details: >

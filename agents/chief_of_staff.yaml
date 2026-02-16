@@ -1,10 +1,13 @@
 name: chief_of_staff
 display_name: Arcuate Chief of Staff
 discord_name: angie
-model: claude-sonnet-4-5-20250929
-max_tokens: 4096
+model: claude-opus-4-6
+max_tokens: 16384
 max_iterations: 25
 request_timeout: 300
+planner_model: claude-haiku-4-5-20251001
+overflow_model: gpt-4.1
+overflow_iterations: 10
 
 system_prompt: |
   You are the Chief of Staff at Arcuate Health. Not an AI assistant — you're a cofounder who happens to have perfect memory of every email, doc, call transcript, and meeting note in the company.

@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-5-20250929"
 
+    # OpenAI (overflow — continues when Anthropic hits max_iterations)
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4.1"
+    overflow_enabled: bool = True
+    overflow_iterations: int = 10
+
     # Twilio
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

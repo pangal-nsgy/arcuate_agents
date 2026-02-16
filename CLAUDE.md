@@ -44,7 +44,8 @@ PYTHONPATH=src uvicorn chief_of_staff.main:app --host 0.0.0.0 --port 8000
                              │
 ┌────────────────────────────▼────────────────────────────────┐
 │  AGENT CORE (src/chief_of_staff/agent/)                     │
-│  core.py      — Async agentic loop (Claude API + tools)     │
+│  core.py      — 3-layer loop (Planner→Executor→Overflow)    │
+│  openai_adapter.py — OpenAI overflow (GPT-4.1 fallback)     │
 │  tools.py     — Facade → delegates to skill modules         │
 │  registry.py  — YAML config loader (agents/*.yaml)          │
 │  router.py    — Multi-agent message routing                 │
@@ -204,6 +205,8 @@ All env vars are loaded via Pydantic `Settings` in `src/chief_of_staff/config.py
 | `ANTHROPIC_API_KEY` | Agent can't reason (core loop fails) |
 | `DISCORD_BOT_TOKEN` | No Discord interface (primary input channel) |
 
+`OPENAI_API_KEY` is optional — enables GPT-4.1 overflow when Anthropic exhausts iterations. Without it, overflow is disabled and agent returns a limit message.
+
 Everything else degrades gracefully — Twilio tools return errors, ingestion skips, code ops disabled, etc.
 
 ---
@@ -280,18 +283,19 @@ Single Discord bot instance, routes messages to the right agent:
 
 Trigger words from ALL agents are merged for the bot's `_should_respond()` check. Activity logs use the resolved `agent_name`.
 
-### Agent loop (core.py)
+### Agent loop (core.py) — 3-layer architecture
 
 1. Reload config from YAML (picks up self-modifications)
 2. Resolve skills + tools into effective tool list (`get_resolved_tools()`)
 3. Build system prompt = base prompt + standing instructions + memory context
 4. Retrieve KB context via semantic search (graceful degradation if ChromaDB is down)
-5. Agentic loop (up to `max_iterations`):
+5. **Layer 1 — Tool Planner (Haiku)**: If >10 tools, Haiku selects 5-12 relevant tools. Meta-tools (report_progress, remember, recall_memory) always included. Falls back to all tools on error.
+6. **Layer 2 — Executor (Opus)**: Agentic loop (up to `max_iterations`) with focused tool set:
    - Call Claude API with retry
-   - Execute any tool_use blocks (30s timeout per tool)
+   - Execute any tool_use blocks (30s timeout per tool, 120s for long-running)
    - Append results, repeat
-6. Return final text response
-7. Log all activity to SQLite
+7. **Layer 3 — Overflow (GPT-4.1)**: If Anthropic exhausts iterations and `OPENAI_API_KEY` is set, converts messages + tools to OpenAI format, runs up to `overflow_iterations` more turns. If OpenAI also exhausts, returns limit message.
+8. Log all activity to SQLite (including tool_planning and overflow_response events)
 
 ### Adding a new agent
 
@@ -303,11 +307,11 @@ Trigger words from ALL agents are merged for the bot's `_should_respond()` check
 
 ---
 
-## Activity Tracking (26 action types)
+## Activity Tracking (28 action types)
 
 All activity is logged to the `agent_activity` SQLite table via `log_activity()` in `activity.py`.
 
-**Action types**: `message_received`, `message_sent`, `tool_use`, `knowledge_search`, `web_search`, `config_update`, `memory_write`, `memory_read`, `sub_agent_spawn`, `delegation`, `sms_received`, `sms_sent`, `call_ingested`, `email_ingested`, `doc_ingested`, `meeting_ingested`, `ingestion_sync`, `webhook_received`, `code_read`, `code_edit`, `code_deploy`, `python_exec`, `webpage_fetch`, `package_install`, `progress_report`, `error`
+**Action types**: `message_received`, `message_sent`, `tool_use`, `knowledge_search`, `web_search`, `config_update`, `memory_write`, `memory_read`, `sub_agent_spawn`, `delegation`, `sms_received`, `sms_sent`, `call_ingested`, `email_ingested`, `doc_ingested`, `meeting_ingested`, `ingestion_sync`, `webhook_received`, `code_read`, `code_edit`, `code_deploy`, `python_exec`, `webpage_fetch`, `package_install`, `progress_report`, `tool_planning`, `overflow_response`, `error`
 
 **Files that log activity** (if you add a new communication channel, wire it up here):
 - `discord_bot.py` — message_received, message_sent, error
@@ -556,7 +560,8 @@ Push to `dev` OR PR targeting `dev`
 
 - **Multi-agent workforce**: COS (orchestrator) + Onboarding Specialist, with skill-based tool loading
 - **Discord bot**: Single bot, multi-agent routing via @mention / trigger words / default COS
-- **Skills system**: 9 reusable skill modules, 25 tools — agents load skills by name
+- **Layered Intelligence**: 3-layer architecture — Haiku tool planner, Opus executor, GPT-4.1 overflow
+- **Skills system**: 9 reusable skill modules, 27 tools — agents load skills by name
 - **Email**: Sends/reads as the agent email via Gmail API
 - **Knowledge base**: 500+ emails, 27 Google Docs, 35+ ElevenLabs transcripts
 - **Code self-modification**: Working — agent can read/edit/deploy via Discord

@@ -296,6 +296,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .action-badge.webpage_fetch { background: #0c3547; color: #38bdf8; }
   .action-badge.package_install { background: #3d2f0a; color: #fbbf24; }
   .action-badge.progress_report { background: #1a3333; color: #5eead4; }
+  .action-badge.tool_planning { background: #2d3a1f; color: #a3e635; }
+  .action-badge.overflow_response { background: #3b1d42; color: #f0abfc; }
 
   .sidebar { background: var(--surface); overflow-y: auto; }
   .agent-card {
@@ -471,6 +473,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <option value="webpage_fetch">Webpage Fetch</option>
           <option value="package_install">Package Install</option>
           <option value="progress_report">Progress Report</option>
+          <option value="tool_planning">Tool Planning</option>
+          <option value="overflow_response">Overflow Response</option>
           <option value="error">Error</option>
         </select>
         <select id="filter-hours" onchange="refresh()">

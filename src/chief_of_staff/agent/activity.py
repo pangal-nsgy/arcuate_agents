@@ -78,6 +78,9 @@ PYTHON_EXEC = "python_exec"
 WEBPAGE_FETCH = "webpage_fetch"
 PACKAGE_INSTALL = "package_install"
 PROGRESS_REPORT = "progress_report"
+# Layered intelligence
+TOOL_PLANNING = "tool_planning"
+OVERFLOW_RESPONSE = "overflow_response"
 
 
 def init_activity_tables() -> None:
@@ -254,6 +257,8 @@ def get_activity_stats(hours: int = 24) -> dict[str, Any]:
         "team_pulses": by_type.get(TEAM_PULSE, 0),
         "engagement_alerts": by_type.get(ENGAGEMENT_ALERT, 0),
         "catchups_generated": by_type.get(CATCHUP_GENERATED, 0),
+        "tool_plannings": by_type.get(TOOL_PLANNING, 0),
+        "overflow_responses": by_type.get(OVERFLOW_RESPONSE, 0),
         "active_agents": [r["agent_name"] for r in agents],
         "by_type": by_type,
     }

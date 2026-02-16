@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from fnmatch import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,17 +35,46 @@ class AgentConfig:
     triage_prompt: str = ""
     trigger_words: list[str] = field(default_factory=list)
     request_timeout: int = 120
+    planner_model: str = "claude-haiku-4-5-20251001"
+    overflow_model: str = "gpt-4.1"
+    overflow_iterations: int = 10
+    tool_policy: dict[str, list[str]] = field(default_factory=dict)
+
+    @staticmethod
+    def _matches_any_pattern(tool_name: str, patterns: list[str]) -> bool:
+        name = tool_name.lower()
+        for pattern in patterns:
+            if fnmatch(name, pattern.lower()):
+                return True
+        return False
+
+    def _apply_tool_policy(self, tool_names: list[str]) -> list[str]:
+        """Apply allow/deny tool policy (deny precedence, wildcard support)."""
+        policy = self.tool_policy or {}
+        allow = [str(v) for v in policy.get("allow", []) if str(v).strip()]
+        deny = [str(v) for v in policy.get("deny", []) if str(v).strip()]
+
+        filtered: list[str] = []
+        for name in tool_names:
+            # Deny wins (including deny-all wildcard).
+            if "*" in deny or self._matches_any_pattern(name, deny):
+                continue
+            # Empty allow means allow-by-default (unless denied above).
+            if allow and "*" not in allow and not self._matches_any_pattern(name, allow):
+                continue
+            filtered.append(name)
+        return filtered
 
     def get_resolved_tools(self) -> list[str]:
         """Resolve skills + explicit tools into a flat tool name list."""
         if not self.skills:
-            return self.tools  # backward compatible
+            return self._apply_tool_policy(self.tools)  # backward compatible
         from chief_of_staff.agent.skills import get_skill_registry
         resolved = get_skill_registry().resolve_skills(self.skills)
         for t in self.tools:
             if t not in resolved:
                 resolved.append(t)
-        return resolved
+        return self._apply_tool_policy(resolved)
 
     @classmethod
     def from_yaml(cls, path: Path) -> AgentConfig:
@@ -67,6 +97,10 @@ class AgentConfig:
             triage_prompt=data.get("triage_prompt", ""),
             trigger_words=data.get("trigger_words", []),
             request_timeout=data.get("request_timeout", 120),
+            planner_model=data.get("planner_model", "claude-haiku-4-5-20251001"),
+            overflow_model=data.get("overflow_model", "gpt-4.1"),
+            overflow_iterations=data.get("overflow_iterations", 10),
+            tool_policy=data.get("tool_policy", {}),
         )
 
     def to_yaml(self, path: Path) -> None:
@@ -87,6 +121,10 @@ class AgentConfig:
             "triage_prompt": self.triage_prompt,
             "trigger_words": self.trigger_words,
             "request_timeout": self.request_timeout,
+            "planner_model": self.planner_model,
+            "overflow_model": self.overflow_model,
+            "overflow_iterations": self.overflow_iterations,
+            "tool_policy": self.tool_policy,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:

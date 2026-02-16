@@ -69,9 +69,23 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
     elif name == "delegate_task":
         from chief_of_staff.agent.activity import log_activity, DELEGATION
         from chief_of_staff.agent.core import get_agent_by_name
+        from chief_of_staff.agent.delegation_context import (
+            enter_delegation,
+            exit_delegation,
+            get_delegation_depth,
+        )
+        from chief_of_staff.agent.registry import get_registry
 
         target_name = args["agent_name"]
         task = args["task"]
+        caller_config = get_registry().get(agent_name)
+        max_depth = int((caller_config.permissions or {}).get("max_delegation_depth", 1)) if caller_config else 1
+        current_depth = get_delegation_depth()
+        if current_depth >= max_depth:
+            return (
+                f"Error: max delegation depth reached ({current_depth}/{max_depth}). "
+                "Complete this step directly or increase max_delegation_depth."
+            )
 
         sub_agent = get_agent_by_name(target_name)
         if not sub_agent:
@@ -84,6 +98,7 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
             input_summary=task[:500],
         )
 
+        token = enter_delegation()
         try:
             result = await sub_agent.respond(
                 user_message=task,
@@ -93,6 +108,8 @@ async def execute(name: str, args: dict[str, Any], agent_name: str) -> str:
             return f"[{target_name} response]:\n{result}"
         except Exception as e:
             return f"Error delegating to {target_name}: {e}"
+        finally:
+            exit_delegation(token)
 
     else:
         raise ValueError(f"Unknown delegation tool: {name}")

@@ -72,3 +72,23 @@ async def test_respond_iteration_limit(agent, mock_anthropic_response):
                 result = await agent.respond("Do a lot of things")
 
     assert "limit" in result.lower() or "breaking down" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_capability_refusal_triggers_one_recovery_retry(agent, mock_anthropic_response):
+    """If model refuses for missing capability, core should force one recovery pass."""
+    agent.config.tools = ["create_task_plan", "execute_task_plan", "scaffold_skill"]
+    agent.client.messages.create = AsyncMock(
+        side_effect=[
+            mock_anthropic_response("I don't have a tool for that capability right now."),
+            mock_anthropic_response("I created a workaround plan and started execution."),
+        ]
+    )
+
+    with patch("chief_of_staff.agent.core.get_registry") as mock_reg:
+        mock_reg.return_value.get.return_value = agent.config
+        with patch("chief_of_staff.knowledge.store.get_context_for_query", return_value=""):
+            result = await agent.respond("Draft and send a follow-up email")
+
+    assert "workaround plan" in result.lower()
+    assert agent.client.messages.create.await_count == 2

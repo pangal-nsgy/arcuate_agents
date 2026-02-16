@@ -12,6 +12,7 @@ import asyncio
 import functools
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -39,7 +40,28 @@ _DEFAULT_TOOL_TIMEOUT = 30
 _ALWAYS_AVAILABLE_TOOLS = {
     "report_progress", "remember", "recall_memory",
     "delegate_task", "spawn_sub_agent_task",
+    "create_task_plan", "execute_task_plan", "scaffold_skill",
 }
+
+_CAPABILITY_REFUSAL_PATTERNS = (
+    r"\bi don't have\b",
+    r"\bi do not have\b",
+    r"\bi can't\b",
+    r"\bi cannot\b",
+    r"\bnot available\b",
+    r"\bno tool\b",
+    r"\bmissing capability\b",
+)
+
+
+def _looks_like_capability_refusal(text: str) -> bool:
+    """Heuristic to detect refusal due to missing capabilities/tools."""
+    lower = (text or "").lower()
+    if not lower.strip():
+        return False
+    if "tool" not in lower and "capab" not in lower:
+        return False
+    return any(re.search(pattern, lower) for pattern in _CAPABILITY_REFUSAL_PATTERNS)
 
 
 class Agent:
@@ -237,6 +259,7 @@ class Agent:
 
         # Layer 2: Agentic loop (Anthropic executor)
         start_time = time.time()
+        attempted_capability_recovery = False
         for iteration in range(self.config.max_iterations):
             try:
                 response = await retry_async(
@@ -267,7 +290,31 @@ class Agent:
             if not tool_calls:
                 # Final text response
                 text_blocks = [b.text for b in assistant_content if hasattr(b, "text")]
-                return "\n".join(text_blocks) if text_blocks else "Processed — nothing to add."
+                final_text = "\n".join(text_blocks) if text_blocks else "Processed — nothing to add."
+
+                # If the model refused due to missing capabilities, give it one forced recovery pass.
+                has_capability_bootstrap = bool(
+                    {"create_task_plan", "execute_task_plan", "scaffold_skill"} & set(all_tool_names)
+                )
+                if (
+                    has_capability_bootstrap
+                    and not attempted_capability_recovery
+                    and _looks_like_capability_refusal(final_text)
+                ):
+                    attempted_capability_recovery = True
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Do not stop at capability refusal. Use available orchestration/self-mod/code tools "
+                                "to propose and execute a concrete workaround now. First report what is missing, then "
+                                "attempt to scaffold/attach/execute with available tools."
+                            ),
+                        }
+                    )
+                    continue
+
+                return final_text
 
             # Execute custom tool calls
             tool_results = []

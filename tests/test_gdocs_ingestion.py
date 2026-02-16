@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from chief_of_staff.ingestion.gdocs import _list_docs_from_drive, _list_accessible_shared_drive_ids
+from chief_of_staff.ingestion.gdocs import (
+    _list_docs_from_drive,
+    _list_accessible_shared_drive_ids,
+    _fetch_doc_text,
+)
 
 
 def test_list_docs_includes_all_drives_and_shared_drive_ids(monkeypatch):
@@ -118,3 +122,48 @@ def test_list_docs_merges_configured_and_discovered_drive_ids(monkeypatch):
 
     assert len(files) == 2
     assert sorted([c["driveId"] for c in per_drive_calls]) == ["driveA", "driveB"]
+
+
+def test_fetch_doc_text_uses_docs_api_when_available():
+    """Should return text from Docs API when primary call succeeds."""
+    docs = SimpleNamespace(
+        documents=lambda: SimpleNamespace(
+            get=lambda documentId: SimpleNamespace(
+                execute=lambda: {
+                    "body": {
+                        "content": [
+                            {"paragraph": {"elements": [{"textRun": {"content": "Hello"}}]}},
+                            {"paragraph": {"elements": [{"textRun": {"content": " world"}}]}},
+                        ]
+                    }
+                }
+            )
+        )
+    )
+    drive = SimpleNamespace(
+        files=lambda: SimpleNamespace(
+            export=lambda **kwargs: SimpleNamespace(execute=lambda: b"fallback")
+        )
+    )
+
+    text = _fetch_doc_text("doc-1", docs=docs, drive=drive)
+    assert text == "Hello world"
+
+
+def test_fetch_doc_text_falls_back_to_drive_export():
+    """If Docs API fails, should fall back to Drive export."""
+    docs = SimpleNamespace(
+        documents=lambda: SimpleNamespace(
+            get=lambda documentId: SimpleNamespace(
+                execute=lambda: (_ for _ in ()).throw(RuntimeError("docs api failed"))
+            )
+        )
+    )
+    drive = SimpleNamespace(
+        files=lambda: SimpleNamespace(
+            export=lambda **kwargs: SimpleNamespace(execute=lambda: b"Fallback text")
+        )
+    )
+
+    text = _fetch_doc_text("doc-1", docs=docs, drive=drive)
+    assert text == "Fallback text"

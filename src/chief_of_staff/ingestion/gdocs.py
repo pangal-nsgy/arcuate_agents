@@ -34,8 +34,9 @@ def fetch_and_ingest_docs(folder_id: str | None = None, max_results: int = 50) -
 
     for file in files:
         try:
-            doc = docs.documents().get(documentId=file["id"]).execute()
-            content = _extract_doc_text(doc)
+            content = _fetch_doc_text(file_id=file["id"], docs=docs, drive=drive)
+            if not content.strip():
+                raise ValueError("Document content is empty")
 
             ingest(
                 source="gdocs",
@@ -55,6 +56,24 @@ def fetch_and_ingest_docs(folder_id: str | None = None, max_results: int = 50) -
 
     logger.info(f"Ingested {count}/{len(files)} Google Docs")
     return count
+
+
+def _fetch_doc_text(file_id: str, docs: Any, drive: Any) -> str:
+    """Fetch Google Doc text, with Drive export fallback for shared-drive edge cases."""
+    # Primary path: Google Docs API
+    try:
+        doc = docs.documents().get(documentId=file_id).execute()
+        return _extract_doc_text(doc)
+    except Exception as docs_err:
+        logger.warning(f"Docs API fetch failed for {file_id}; trying Drive export fallback: {docs_err}")
+
+    # Fallback path: Drive export as plain text
+    exported = drive.files().export(fileId=file_id, mimeType="text/plain").execute()
+    if isinstance(exported, bytes):
+        return exported.decode("utf-8", errors="replace")
+    if isinstance(exported, str):
+        return exported
+    return str(exported)
 
 
 def _iter_doc_files(

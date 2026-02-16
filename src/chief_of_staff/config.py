@@ -59,9 +59,9 @@ class Settings(BaseSettings):
     gmail_watch_topic: str = ""  # Pub/Sub topic for Gmail watch (e.g., projects/agents-arcuate/topics/gmail-push)
 
     # Discord channels for proactive features
-    briefing_channel: str = "daily-briefing"
-    meeting_notes_channel: str = "meeting-notes"
-    team_health_channel: str = "team-health"
+    briefing_channel: str = "chief-of-staff"
+    meeting_notes_channel: str = "chief-of-staff"
+    team_health_channel: str = "chief-of-staff"
 
     # Server
     host: str = "0.0.0.0"

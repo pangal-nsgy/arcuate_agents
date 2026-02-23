@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from chief_of_staff.agent.tools import ALL_TOOL_DEFINITIONS, execute_tool
 from chief_of_staff.config import settings
 from chief_of_staff.gateway.auth import require_gateway_token
+from chief_of_staff.gateway.control_plane import invoke_control_action
 from chief_of_staff.gateway.exec_approvals import get_exec_approvals_service
 from chief_of_staff.gateway.usage_budget import get_usage_budget_service
 
@@ -20,6 +21,7 @@ _EXEC_APPROVAL_ACTIONS = {
     "exec.approval.resolve",
 }
 _USAGE_ACTIONS = {"usage.status", "usage.cost"}
+_CONTROL_ACTIONS = {"health", "status", "config.get", "config.set", "config.apply", "config.patch"}
 
 
 def _http_tool_allowed(tool_name: str) -> bool:
@@ -70,6 +72,12 @@ async def tools_invoke(request: Request) -> dict[str, object]:
         if action_name == "usage.status":
             return {"ok": True, "result": service.status(session_key=session_key, run_id=run_id)}
         return {"ok": True, "result": service.cost()}
+
+    if action_name in _CONTROL_ACTIONS:
+        try:
+            return {"ok": True, "result": invoke_control_action(action_name, args)}
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     tool = str(payload.get("tool", "")).strip()
     if not tool:

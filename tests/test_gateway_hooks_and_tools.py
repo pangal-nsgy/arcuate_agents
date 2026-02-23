@@ -448,6 +448,47 @@ def test_openai_responses_compat(monkeypatch):
     assert body["output"][0]["content"][0]["text"] == "done"
 
 
+def test_control_plane_actions_via_tools_invoke(monkeypatch):
+    monkeypatch.setattr(
+        "chief_of_staff.gateway.tools_invoke.settings.gateway_auth_token",
+        "gw",
+    )
+    client = TestClient(_build_app())
+
+    health = client.post(
+        "/tools/invoke",
+        json={"action": "health", "args": {}},
+        headers={"Authorization": "Bearer gw"},
+    )
+    assert health.status_code == 200
+    assert health.json()["result"]["ok"] is True
+
+    config_set = client.post(
+        "/tools/invoke",
+        json={"action": "config.set", "args": {"key": "hooks_enabled", "value": False}},
+        headers={"Authorization": "Bearer gw"},
+    )
+    assert config_set.status_code == 200
+    assert config_set.json()["result"]["value"] is False
+
+    config_get = client.post(
+        "/tools/invoke",
+        json={"action": "config.get", "args": {"key": "hooks_enabled"}},
+        headers={"Authorization": "Bearer gw"},
+    )
+    assert config_get.status_code == 200
+    assert config_get.json()["result"]["value"] is False
+
+    status = client.post(
+        "/tools/invoke",
+        json={"action": "status", "args": {}},
+        headers={"Authorization": "Bearer gw"},
+    )
+    assert status.status_code == 200
+    assert status.json()["result"]["ok"] is True
+    assert "usage" in status.json()["result"]
+
+
 def test_concurrent_exec_approval_requests_are_thread_safe(tmp_path, monkeypatch):
     approvals_path = tmp_path / "exec-approvals.json"
     monkeypatch.setattr("chief_of_staff.gateway.tools_invoke.settings.gateway_auth_token", "gw")

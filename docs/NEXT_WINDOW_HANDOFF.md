@@ -4,7 +4,7 @@
 - Repo: `https://github.com/pangal-nsgy/arcuate_agents`
 - Active branch: `claude/mcp-chrome-extension-BW3zj`
 - OpenClaw reference repo: `https://github.com/openclaw/openclaw`
-- Latest implementation commit: `branch HEAD` (currently `7a5fa14`)
+- Latest implementation commit: `branch HEAD` (see `git log -1 --oneline`)
 
 ## What Is Already Done
 1. Strict OpenClaw parity blueprint:
@@ -52,6 +52,9 @@
 15. Pre-funding validation gate:
    - `docs/PREFUND_VALIDATION.md`
    - `scripts/prefund_gate.sh`
+16. DB/runtime architecture rethink (OpenClaw host-local state model):
+   - `docs/DB_RUNTIME_RETHINK_OPENCLAW.md`
+   - `src/chief_of_staff/config.py` (`STATE_DIR` + state-rooted runtime file paths)
 
 ## Current Safety Defaults
 - LLM inbound: off by default unless explicitly resumed.
@@ -64,7 +67,8 @@
 3. Complete remaining P0 control-plane parity gaps referenced in `docs/OPENCLAW_ADOPTION_BLUEPRINT.md`.
 4. Wire voice transcript command execution to approval IDs and delivery confirmations.
 5. Add non-Railway runtime deployment manifests + cutover runbook.
-6. Run `docs/PREFUND_VALIDATION.md` in staging and only then re-fund Anthropic.
+6. Implement Phase 1 from `docs/DB_RUNTIME_RETHINK_OPENCLAW.md` (SQLite WAL + migrations + state backup/restore).
+7. Run `docs/PREFUND_VALIDATION.md` in staging and only then re-fund Anthropic.
 
 ## Twilio Note
 - Secondary number provided by user: `+1 628-212-7401`

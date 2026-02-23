@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
+
+    # Runtime state root (OpenClaw-style host-local mutable data)
+    state_dir: str = "~/.arcuate_agents"
 
     # Anthropic
     anthropic_api_key: str = ""
@@ -36,7 +41,7 @@ class Settings(BaseSettings):
     bluebubbles_group_allow_from: list[str] = []
     bluebubbles_require_mention_in_groups: bool = True
     bluebubbles_mention_keywords: list[str] = ["@chief", "chief of staff", "arcuate"]
-    bluebubbles_pairing_store_path: str = "./bluebubbles-pairing.json"
+    bluebubbles_pairing_store_path: str = "bluebubbles-pairing.json"
     bluebubbles_pairing_code_ttl_minutes: int = 60
 
     # ElevenLabs
@@ -95,7 +100,7 @@ class Settings(BaseSettings):
 
     # Gateway auth + HTTP tool policy (OpenClaw-style surface)
     gateway_auth_token: str = ""
-    exec_approvals_path: str = "./exec-approvals.json"
+    exec_approvals_path: str = "exec-approvals.json"
     gateway_tools_deny: list[str] = [
         "sessions_spawn",
         "sessions_send",
@@ -111,11 +116,11 @@ class Settings(BaseSettings):
     hooks_allow_request_session_key: bool = False
     hooks_default_session_key: str = "hook:ingress"
     hooks_allowed_session_key_prefixes: list[str] = ["hook:"]
-    hooks_transforms_dir: str = "./hooks/transforms"
+    hooks_transforms_dir: str = "hooks/transforms"
     hooks_mappings: list[dict[str, Any]] = []
 
     # Usage and cost circuit breakers
-    usage_ledger_path: str = "./usage-ledger.json"
+    usage_ledger_path: str = "usage-ledger.json"
     usage_default_action_cost_usd: float = 0.01
     usage_run_budget_usd: float = 0.50
     usage_session_budget_usd: float = 2.00
@@ -141,8 +146,27 @@ class Settings(BaseSettings):
     command_timeout_seconds: int = 20
 
     # Knowledge store
-    chroma_persist_dir: str = "./chroma_data"
-    sqlite_db_path: str = "./chief_of_staff.db"
+    chroma_persist_dir: str = "chroma_data"
+    sqlite_db_path: str = "chief_of_staff.db"
+
+    @model_validator(mode="after")
+    def _normalize_state_paths(self) -> Settings:
+        state_root = Path(self.state_dir).expanduser()
+        self.state_dir = str(state_root)
+
+        def _to_state_path(value: str) -> str:
+            path = Path(value).expanduser()
+            if path.is_absolute():
+                return str(path)
+            return str(state_root / path)
+
+        self.bluebubbles_pairing_store_path = _to_state_path(self.bluebubbles_pairing_store_path)
+        self.exec_approvals_path = _to_state_path(self.exec_approvals_path)
+        self.hooks_transforms_dir = _to_state_path(self.hooks_transforms_dir)
+        self.usage_ledger_path = _to_state_path(self.usage_ledger_path)
+        self.chroma_persist_dir = _to_state_path(self.chroma_persist_dir)
+        self.sqlite_db_path = _to_state_path(self.sqlite_db_path)
+        return self
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

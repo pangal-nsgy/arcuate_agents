@@ -28,8 +28,9 @@ Stand up an OpenClaw-style runtime for Arcuate with:
 ## Recommended target topology
 - `gateway` service: WS + HTTP mux, auth, sessions, approvals.
 - `worker` service: tool execution lane + subagent runs.
-- `db` services: Postgres + Redis.
-- `blob` store: transcripts, artifacts, logs.
+- `state_dir` (host-local): approvals, pairing, ledgers, queues, transforms, transcripts.
+- `sqlite` (host-local): runtime + knowledge relational state.
+- `blob/analytics` (optional later): replicas/exports only, not safety-critical source of truth.
 - `obs` stack: OpenTelemetry + logs + alerts.
 
 ---
@@ -134,4 +135,3 @@ Before Anthropic re-fund and production enablement:
 
 ## 6) Known Inputs
 - Twilio number: `+1 628-212-7401` (secondary channel, not primary iMessage path).
-

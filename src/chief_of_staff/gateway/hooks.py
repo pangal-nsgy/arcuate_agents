@@ -19,6 +19,7 @@ from chief_of_staff.agent.activity import WEBHOOK_RECEIVED, log_activity
 from chief_of_staff.agent.core import get_agent
 from chief_of_staff.config import settings
 from chief_of_staff.gateway.auth import extract_bearer_token
+from chief_of_staff.gateway.usage_budget import get_usage_budget_service
 
 router = APIRouter(tags=["hooks"])
 
@@ -262,6 +263,15 @@ def _handle_wake_payload(payload: dict[str, Any], action_detail: str = "hook.wak
     if mode not in {"now", "next-heartbeat"}:
         raise HTTPException(status_code=400, detail="mode must be 'now' or 'next-heartbeat'")
 
+    budget = get_usage_budget_service().check_and_consume(
+        session_key=settings.hooks_default_session_key,
+        run_id=f"hook-wake:{mode}",
+        cost_usd=float(settings.usage_default_action_cost_usd),
+        reason="hook wake execution",
+    )
+    if not budget.get("allowed"):
+        raise HTTPException(status_code=429, detail=f"budget exceeded at {budget.get('scope')} scope")
+
     log_activity(
         agent_name="chief_of_staff",
         action_type=WEBHOOK_RECEIVED,
@@ -281,6 +291,16 @@ def _handle_agent_payload(payload: dict[str, Any], action_detail: str = "hook.ag
     allow_request_override = bool(payload.get("_allow_mapping_session_key", False))
     session_key = _resolve_session_key(payload, allow_request_override=allow_request_override)
     run_id = str(uuid.uuid4())
+
+    budget = get_usage_budget_service().check_and_consume(
+        session_key=session_key,
+        run_id=run_id,
+        cost_usd=float(settings.usage_default_action_cost_usd),
+        reason="hook agent execution",
+    )
+    if not budget.get("allowed"):
+        raise HTTPException(status_code=429, detail=f"budget exceeded at {budget.get('scope')} scope")
+
     _active_hook_runs[run_id] = {"status": "running", "session_key": session_key}
 
     log_activity(

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from chief_of_staff.communication.control_commands import handle_control_message
+from chief_of_staff.gateway.exec_approvals import get_exec_approvals_service
 from chief_of_staff.gateway.hooks import router as hooks_router
 from chief_of_staff.gateway.exec_approvals import reset_exec_approvals_service_for_tests
 from chief_of_staff.gateway.openai_compat import router as openai_compat_router
@@ -20,6 +24,20 @@ def _build_app() -> FastAPI:
     app.include_router(tools_router)
     app.include_router(openai_compat_router)
     return app
+
+
+@pytest.fixture(autouse=True)
+def _isolate_usage_ledger(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "chief_of_staff.gateway.exec_approvals.settings.exec_approvals_path",
+        str(tmp_path / "exec-approvals.json"),
+    )
+    reset_exec_approvals_service_for_tests()
+    monkeypatch.setattr(
+        "chief_of_staff.gateway.usage_budget.settings.usage_ledger_path",
+        str(tmp_path / "usage-ledger.json"),
+    )
+    reset_usage_budget_service_for_tests()
 
 
 def test_hooks_reject_query_token(monkeypatch):
@@ -428,3 +446,102 @@ def test_openai_responses_compat(monkeypatch):
     body = resp.json()
     assert body["object"] == "response"
     assert body["output"][0]["content"][0]["text"] == "done"
+
+
+def test_concurrent_exec_approval_requests_are_thread_safe(tmp_path, monkeypatch):
+    approvals_path = tmp_path / "exec-approvals.json"
+    monkeypatch.setattr("chief_of_staff.gateway.tools_invoke.settings.gateway_auth_token", "gw")
+    monkeypatch.setattr(
+        "chief_of_staff.gateway.exec_approvals.settings.exec_approvals_path",
+        str(approvals_path),
+    )
+    reset_exec_approvals_service_for_tests()
+    client = TestClient(_build_app())
+
+    def _request(i: int) -> tuple[int, str]:
+        resp = client.post(
+            "/tools/invoke",
+            json={
+                "action": "exec.approval.request",
+                "args": {
+                    "request": {
+                        "tool": "execute_python",
+                        "command": f"print({i})",
+                        "requestedBy": "agent:chief_of_staff",
+                    }
+                },
+            },
+            headers={"Authorization": "Bearer gw"},
+        )
+        return resp.status_code, resp.json()["result"]["requestId"]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(_request, range(12)))
+
+    assert all(status == 200 for status, _ in results)
+    ids = [request_id for _, request_id in results]
+    assert len(set(ids)) == 12
+
+    get_resp = client.post(
+        "/tools/invoke",
+        json={"action": "exec.approvals.get", "args": {}},
+        headers={"Authorization": "Bearer gw"},
+    )
+    assert get_resp.status_code == 200
+    assert get_resp.json()["result"]["pendingCount"] == 12
+
+
+def test_budget_stop_integration_across_hooks_tools_and_control(monkeypatch):
+    monkeypatch.setattr("chief_of_staff.gateway.tools_invoke.settings.gateway_auth_token", "gw")
+    monkeypatch.setattr("chief_of_staff.gateway.hooks.settings.hooks_enabled", True)
+    monkeypatch.setattr("chief_of_staff.gateway.hooks.settings.hooks_token", "secret")
+    monkeypatch.setattr("chief_of_staff.gateway.usage_budget.settings.usage_day_budget_usd", 0.02)
+    monkeypatch.setattr("chief_of_staff.gateway.usage_budget.settings.usage_session_budget_usd", 1.0)
+    monkeypatch.setattr("chief_of_staff.gateway.usage_budget.settings.usage_run_budget_usd", 1.0)
+    monkeypatch.setattr("chief_of_staff.gateway.hooks.settings.usage_default_action_cost_usd", 0.01)
+    monkeypatch.setattr("chief_of_staff.gateway.tools_invoke.settings.usage_default_action_cost_usd", 0.01)
+    monkeypatch.setattr("chief_of_staff.communication.control_commands.settings.usage_default_action_cost_usd", 0.01)
+    monkeypatch.setattr(
+        "chief_of_staff.gateway.tools_invoke.ALL_TOOL_DEFINITIONS",
+        {"sessions_spawn": {"name": "sessions_spawn"}},
+    )
+    monkeypatch.setattr(
+        "chief_of_staff.gateway.tools_invoke.settings.gateway_tools_allow",
+        ["sessions_spawn"],
+    )
+    monkeypatch.setattr(
+        "chief_of_staff.gateway.tools_invoke.settings.gateway_tools_deny",
+        [],
+    )
+    monkeypatch.setattr(
+        "chief_of_staff.communication.control_commands.settings.command_allowed_phones",
+        ["+15550001111"],
+    )
+    monkeypatch.setattr(
+        "chief_of_staff.communication.control_commands.settings.command_allowed_prefixes",
+        ["pwd"],
+    )
+    mock_exec = AsyncMock(return_value="ok")
+    monkeypatch.setattr("chief_of_staff.gateway.tools_invoke.execute_tool", mock_exec)
+    get_exec_approvals_service().set_policy(
+        {"execEnabled": True, "requireApprovalByDefault": False}
+    )
+    client = TestClient(_build_app())
+
+    hook_resp = client.post(
+        "/hooks/wake",
+        json={"text": "x", "mode": "now"},
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert hook_resp.status_code == 200
+
+    tool_resp = client.post(
+        "/tools/invoke",
+        json={"tool": "sessions_spawn", "args": {}, "sessionKey": "s1", "runId": "r1"},
+        headers={"Authorization": "Bearer gw"},
+    )
+    assert tool_resp.status_code == 200
+
+    cmd_resp = handle_control_message("+15550001111", "cmd: pwd")
+    assert cmd_resp.handled is True
+    assert "budget exceeded" in cmd_resp.response.lower()

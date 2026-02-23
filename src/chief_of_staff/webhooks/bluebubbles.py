@@ -95,6 +95,10 @@ def _evaluate_sender_policy(sender: str, text: str, payload: dict[str, Any]) -> 
     if not sender_key:
         return False, "missing_sender", None
 
+    founders = {s.strip() for s in settings.founder_phone_numbers if s.strip()}
+    if sender_key in founders:
+        return True, None, None
+
     paired = get_bluebubbles_pairing_store().is_paired(sender_key)
     dm_allow = {s.strip() for s in settings.bluebubbles_allow_from if s.strip()}
     group_allow = {s.strip() for s in settings.bluebubbles_group_allow_from if s.strip()}

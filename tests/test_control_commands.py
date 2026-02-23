@@ -146,3 +146,19 @@ def test_pair_approve_command(monkeypatch, tmp_path):
 
     approve_result = handle_control_message("+15550001111", f"/pair approve {code}")
     assert "Approved BlueBubbles pairing" in approve_result.response
+
+
+def test_pair_unpair_command(monkeypatch, tmp_path):
+    _reset_state(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "chief_of_staff.communication.control_commands.settings.command_allowed_phones",
+        ["+15550001111"],
+    )
+
+    code = get_bluebubbles_pairing_store().request("+15550009999")
+    handle_control_message("+15550001111", f"/pair approve {code}")
+    paired = handle_control_message("+15550001111", "/pair paired")
+    assert "+15550009999" in paired.response
+
+    unpair = handle_control_message("+15550001111", "/pair unpair +15550009999")
+    assert "Removed BlueBubbles pairing" in unpair.response

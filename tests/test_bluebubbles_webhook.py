@@ -82,3 +82,20 @@ def test_group_allowlist_requires_mention_when_enabled(monkeypatch):
     )
     assert allowed is False
     assert reason == "group_no_mention"
+
+
+def test_founder_sender_bypasses_pairing_policy(monkeypatch):
+    monkeypatch.setattr("chief_of_staff.webhooks.bluebubbles.settings.bluebubbles_dm_policy", "pairing")
+    monkeypatch.setattr(
+        "chief_of_staff.webhooks.bluebubbles.settings.founder_phone_numbers",
+        ["+15550001111"],
+    )
+
+    allowed, reason, reply = _evaluate_sender_policy(
+        sender="+15550001111",
+        text="hello",
+        payload={"data": {"chatGuid": "iMessage;-;x"}},
+    )
+    assert allowed is True
+    assert reason is None
+    assert reply is None

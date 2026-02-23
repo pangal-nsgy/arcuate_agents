@@ -102,6 +102,11 @@ class BlueBubblesPairingStore:
                 items.append({"code": str(code), "sender": str(record.get("sender", ""))})
             return items
 
+    def list_paired(self) -> list[str]:
+        with self._lock:
+            self._cleanup_locked()
+            return list(self._state.get("paired", []))
+
     def approve(self, code: str) -> str | None:
         code_key = code.strip().upper()
         if not code_key:
@@ -132,6 +137,20 @@ class BlueBubblesPairingStore:
                 return None
             self._save_locked()
             return str(record.get("sender", "")).strip() or None
+
+    def unpair(self, sender: str) -> bool:
+        sender_key = sender.strip()
+        if not sender_key:
+            return False
+        with self._lock:
+            self._cleanup_locked()
+            paired = set(self._state.get("paired", []))
+            if sender_key not in paired:
+                return False
+            paired.remove(sender_key)
+            self._state["paired"] = sorted(paired)
+            self._save_locked()
+            return True
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

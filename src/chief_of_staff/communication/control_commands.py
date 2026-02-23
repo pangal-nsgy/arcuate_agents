@@ -199,6 +199,15 @@ def handle_control_message(phone: str, body: str) -> ControlResult:
             lines.append(f"- {item['code']} -> {item['sender']}")
         return ControlResult(handled=True, response="\n".join(lines))
 
+    if message == "/pair paired":
+        paired = get_bluebubbles_pairing_store().list_paired()
+        if not paired:
+            return ControlResult(handled=True, response="No paired BlueBubbles senders.")
+        lines = ["Paired BlueBubbles senders:"]
+        for sender in paired[:50]:
+            lines.append(f"- {sender}")
+        return ControlResult(handled=True, response="\n".join(lines))
+
     if message.startswith("/pair approve "):
         code = message[len("/pair approve ") :].strip()
         sender = get_bluebubbles_pairing_store().approve(code)
@@ -213,11 +222,18 @@ def handle_control_message(phone: str, body: str) -> ControlResult:
             return ControlResult(handled=True, response=f"Pairing code not found: {code}")
         return ControlResult(handled=True, response=f"Denied BlueBubbles pairing for {sender}.")
 
+    if message.startswith("/pair unpair "):
+        sender = message[len("/pair unpair ") :].strip()
+        ok = get_bluebubbles_pairing_store().unpair(sender)
+        if not ok:
+            return ControlResult(handled=True, response=f"Sender not paired: {sender}")
+        return ControlResult(handled=True, response=f"Removed BlueBubbles pairing for {sender}.")
+
     return ControlResult(
         handled=True,
         response=(
             "Unknown control command. Use /status, /pause llm, /resume llm, "
-            "/pause exec, /resume exec, /pair list, /pair approve <code>, /pair deny <code>, "
-            "or cmd: <command>."
+            "/pause exec, /resume exec, /pair list, /pair paired, /pair approve <code>, "
+            "/pair deny <code>, /pair unpair <sender>, or cmd: <command>."
         ),
     )

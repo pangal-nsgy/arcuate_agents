@@ -9,8 +9,10 @@ from fastapi import APIRouter, Form, Request, Response
 from twilio.request_validator import RequestValidator
 
 from chief_of_staff.agent.core import get_agent
+from chief_of_staff.agent.rails import get_rails
 from chief_of_staff.agent.activity import log_activity, SMS_RECEIVED, SMS_SENT, ERROR
 from chief_of_staff.communication.sms import send_sms
+from chief_of_staff.communication.control_commands import handle_control_message
 from chief_of_staff.config import settings
 from chief_of_staff.knowledge.database import get_recent_conversations, log_conversation
 
@@ -52,6 +54,14 @@ async def incoming_sms(
 
     logger.info(f"Incoming {channel_type} from {clean_phone}: {Body[:100]}...")
 
+    control_result = handle_control_message(clean_phone, Body)
+    if control_result.handled:
+        await send_sms(to=clean_phone, body=control_result.response)
+        return Response(
+            content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            media_type="text/xml",
+        )
+
     # Track incoming message
     log_activity(
         agent_name="chief_of_staff",
@@ -78,25 +88,32 @@ async def incoming_sms(
         role = "assistant" if msg.get("direction") == "outbound" else "user"
         history.append({"role": role, "content": msg["message"]})
 
-    # Get agent response
-    try:
-        agent = get_agent()
-        response_text = await agent.respond(
-            user_message=Body,
-            conversation_history=history[:-1],
-            channel=channel_type,
-            user_id=clean_phone,
+    rails = get_rails()
+    if not rails.llm_enabled:
+        response_text = (
+            "LLM handling is currently paused for safety. "
+            "Send '/resume llm' from an authorized phone when ready."
         )
-    except Exception as e:
-        logger.error(f"Agent failed on {channel_type} from {clean_phone}: {e}")
-        log_activity(
-            agent_name="chief_of_staff",
-            action_type=ERROR,
-            action_detail=f"Agent failed on {channel_type}: {e}",
-            channel=channel_type,
-            user_id=clean_phone,
-        )
-        response_text = "Something went wrong — I'll get back to you."
+    else:
+        # Get agent response
+        try:
+            agent = get_agent()
+            response_text = await agent.respond(
+                user_message=Body,
+                conversation_history=history[:-1],
+                channel=channel_type,
+                user_id=clean_phone,
+            )
+        except Exception as e:
+            logger.error(f"Agent failed on {channel_type} from {clean_phone}: {e}")
+            log_activity(
+                agent_name="chief_of_staff",
+                action_type=ERROR,
+                action_detail=f"Agent failed on {channel_type}: {e}",
+                channel=channel_type,
+                user_id=clean_phone,
+            )
+            response_text = "Something went wrong — I'll get back to you."
 
     # Log the response
     log_conversation(

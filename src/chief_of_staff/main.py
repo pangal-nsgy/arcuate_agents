@@ -17,6 +17,7 @@ from chief_of_staff.webhooks.twilio import router as twilio_router
 from chief_of_staff.webhooks.gmail import router as gmail_router
 from chief_of_staff.webhooks.zoom import router as zoom_router
 from chief_of_staff.webhooks.recall import router as recall_router
+from chief_of_staff.webhooks.bluebubbles import router as bluebubbles_router
 from chief_of_staff.dashboard.routes import router as dashboard_router
 
 
@@ -103,6 +104,7 @@ app = FastAPI(
 
 # Register webhook routers
 app.include_router(twilio_router)
+app.include_router(bluebubbles_router)
 app.include_router(gmail_router)
 app.include_router(zoom_router)
 app.include_router(recall_router)
@@ -114,6 +116,8 @@ app.include_router(dashboard_router)
 @app.get("/health")
 async def health_check():
     """Enhanced health check — checks all subsystems."""
+    from chief_of_staff.agent.rails import get_rails
+
     checks = {}
 
     # SQLite
@@ -148,6 +152,11 @@ async def health_check():
 
     # Anthropic key
     checks["anthropic_key"] = "ok" if settings.anthropic_api_key else "missing"
+    rails = get_rails()
+    checks["rails"] = {
+        "llm_enabled": rails.llm_enabled,
+        "command_exec_enabled": rails.command_exec_enabled,
+    }
 
     # Overall status
     has_errors = any("error" in str(v) or v == "missing" for v in checks.values())
@@ -159,7 +168,17 @@ async def health_check():
 @app.post("/api/ask")
 async def ask_agent(query: str, user_id: str | None = None):
     """Direct API endpoint to ask the Chief of Staff a question."""
+    from chief_of_staff.agent.rails import get_rails
     from chief_of_staff.agent.core import get_agent
+
+    rails = get_rails()
+    if not rails.llm_enabled:
+        return {
+            "response": (
+                "LLM inbound is paused by runtime rails. "
+                "Resume via control command: '/resume llm'."
+            )
+        }
 
     agent = get_agent()
     response = await agent.respond(

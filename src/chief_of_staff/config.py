@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
 
+    # BlueBubbles (iMessage primary channel)
+    bluebubbles_enabled: bool = False
+    bluebubbles_server_url: str = ""
+    bluebubbles_password: str = ""
+    bluebubbles_webhook_secret: str = ""
+
     # ElevenLabs
     elevenlabs_api_key: str = ""
 
@@ -76,6 +82,18 @@ class Settings(BaseSettings):
     main_agent_max_concurrency: int = 16
     subagent_max_concurrency: int = 4
     subagent_announce_channel: str = "chief-of-staff"
+
+    # Runtime rails / kill switches
+    llm_inbound_enabled: bool = False
+    command_execution_enabled: bool = False
+    command_allowed_phones: list[str] = []
+    command_allowed_prefixes: list[str] = [
+        "pwd",
+        "ls",
+        "git status",
+        "git log --oneline -n 5",
+    ]
+    command_timeout_seconds: int = 20
 
     # Knowledge store
     chroma_persist_dir: str = "./chroma_data"

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from fastapi import APIRouter, Request
 
@@ -38,6 +37,13 @@ async def recall_real_time_transcript(request: Request) -> dict:
 
     if text.strip():
         logger.debug(f"[Recall RT] Bot {bot_id[:8]} | {speaker}: {text[:100]}...")
+        try:
+            from chief_of_staff.ingestion.voice_commands import handle_transcript_command
+            outcome = await handle_transcript_command(bot_id=bot_id, speaker=speaker, text=text)
+            if outcome:
+                logger.info(f"[Recall RT] Voice command outcome: {outcome[:200]}")
+        except Exception as e:
+            logger.error(f"[Recall RT] Voice command processing failed: {e}", exc_info=True)
 
     return {"status": "ok"}
 

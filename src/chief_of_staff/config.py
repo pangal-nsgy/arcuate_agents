@@ -101,6 +101,12 @@ class Settings(BaseSettings):
     hooks_default_session_key: str = "hook:ingress"
     hooks_allowed_session_key_prefixes: list[str] = ["hook:"]
 
+    # Voice command execution (meeting transcripts -> task execution)
+    voice_exec_enabled: bool = False
+    voice_exec_dry_run: bool = True
+    voice_command_prefixes: list[str] = ["agent execute", "execute task"]
+    voice_allowed_speakers: list[str] = []
+
     # Runtime rails / kill switches
     llm_inbound_enabled: bool = False
     command_execution_enabled: bool = False

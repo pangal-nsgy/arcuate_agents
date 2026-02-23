@@ -20,12 +20,17 @@
    - `GET /hooks/runs/{run_id}`
    - `POST /tools/invoke`
    - plus gateway bearer auth helper.
+7. Added voice-command execution scaffold from meeting transcripts (Recall webhook path):
+   - `src/chief_of_staff/ingestion/voice_commands.py`
+   - wired into `src/chief_of_staff/webhooks/recall.py`
+   - safe defaults: `VOICE_EXEC_ENABLED=false`, `VOICE_EXEC_DRY_RUN=true`
 
 ### In Progress
 1. Replace temporary rails toggles with full OpenClaw-style exec approvals model (`exec-approvals.json` equivalent).
 2. Expand hooks parity with mapped `POST /hooks/<name>` behavior.
 3. Implement full BlueBubbles pairing/group policy parity (currently scaffolded).
 4. Implement usage/cost endpoints and enforced budget circuit breakers.
+5. Implement voice response delivery loop (spoken acknowledgment + execution confirmation) after approvals parity.
 
 ### Next Concrete Steps
 1. Implement persistent exec approval store + APIs (`exec.approvals.*`, `exec.approval.*`).
@@ -35,4 +40,3 @@
 
 ### Known Runtime Inputs
 - Twilio secondary channel number provided: `+1 628-212-7401`.
-

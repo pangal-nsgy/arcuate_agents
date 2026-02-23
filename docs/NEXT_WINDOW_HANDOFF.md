@@ -63,6 +63,16 @@
    - `scripts/state_drill.sh`
    - wired into `scripts/prefund_gate.sh` (default on, opt-out via `PREFUND_SKIP_STATE_DRILL=1`)
    - pass criteria reflected in `docs/PREFUND_VALIDATION.md`
+19. Non-Railway sandbox deployment path:
+   - `deploy/docker-compose.openclaw-local.yml`
+   - `src/chief_of_staff/worker.py`
+   - `docs/NON_RAILWAY_SANDBOX_RUNBOOK.md`
+   - `ENABLE_BACKGROUND_SCHEDULER` split for gateway/worker roles
+20. Staging/prod probe snapshot:
+   - `https://ravishing-patience-production-f793.up.railway.app/health` reachable.
+   - `https://arcuate-staging-staging.up.railway.app/health` reachable.
+   - `/tools/invoke` and `/v1/chat/completions` returned `404` on both (runtime not on parity build).
+   - Railway control-plane API DNS to `backboard.railway.com` failed during token/deploy update attempts.
 
 ## Current Safety Defaults
 - LLM inbound: off by default unless explicitly resumed.
@@ -74,10 +84,11 @@
 2. Harden BlueBubbles pairing/operator UX and validate founder-first routing behavior.
 3. Complete remaining P0 control-plane parity gaps referenced in `docs/OPENCLAW_ADOPTION_BLUEPRINT.md`.
 4. Wire voice transcript command execution to approval IDs and delivery confirmations.
-5. Add non-Railway runtime deployment manifests + cutover runbook.
-6. Execute full staging pre-fund gate with real staging tokens and capture logs/artifacts.
-7. Verify one founder real E2E flow (iMessage ingress -> rails -> deterministic response) in staging.
-8. Only then re-fund Anthropic.
+5. Execute `docs/NON_RAILWAY_SANDBOX_RUNBOOK.md` in sandbox and capture artifacts.
+6. Resolve Railway control-plane connectivity, then deploy parity branch to staging/prod.
+7. Execute full staging pre-fund gate with real staging tokens and capture logs/artifacts.
+8. Verify one founder real E2E flow (iMessage ingress -> rails -> deterministic response) in staging.
+9. Only then re-fund Anthropic.
 
 ## Twilio Note
 - Secondary number provided by user: `+1 628-212-7401`

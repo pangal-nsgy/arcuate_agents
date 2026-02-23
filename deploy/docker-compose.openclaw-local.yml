@@ -1,0 +1,47 @@
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: arcuate-agents:local
+    env_file:
+      - ../.env
+    environment:
+      PORT: "8000"
+      ENABLE_DISCORD_BOT: "false"
+      ENABLE_BACKGROUND_SCHEDULER: "false"
+      STATE_DIR: /app/state
+      CHROMA_PERSIST_DIR: chroma_data
+      SQLITE_DB_PATH: chief_of_staff.db
+      EXEC_APPROVALS_PATH: exec-approvals.json
+      USAGE_LEDGER_PATH: usage-ledger.json
+      BLUEBUBBLES_PAIRING_STORE_PATH: bluebubbles-pairing.json
+      HOOKS_TRANSFORMS_DIR: hooks/transforms
+    ports:
+      - "8000:8000"
+    volumes:
+      - arcuate_state:/app/state
+    restart: unless-stopped
+
+  worker:
+    image: arcuate-agents:local
+    env_file:
+      - ../.env
+    command: ["python3", "-m", "chief_of_staff.worker"]
+    environment:
+      ENABLE_DISCORD_BOT: "false"
+      ENABLE_BACKGROUND_SCHEDULER: "true"
+      STATE_DIR: /app/state
+      CHROMA_PERSIST_DIR: chroma_data
+      SQLITE_DB_PATH: chief_of_staff.db
+      EXEC_APPROVALS_PATH: exec-approvals.json
+      USAGE_LEDGER_PATH: usage-ledger.json
+      BLUEBUBBLES_PAIRING_STORE_PATH: bluebubbles-pairing.json
+      HOOKS_TRANSFORMS_DIR: hooks/transforms
+    volumes:
+      - arcuate_state:/app/state
+    restart: unless-stopped
+    profiles: ["worker"]
+
+volumes:
+  arcuate_state:

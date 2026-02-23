@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     discord_bot_token: str = ""
     enable_discord_bot: bool = True
     discord_channels: list[str] = ["chief-of-staff", "arcuatechat"]  # bot responds in these channels + DMs + @mentions
+    enable_background_scheduler: bool = True
 
     # GitHub (code self-modification)
     github_token: str = ""

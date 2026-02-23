@@ -73,9 +73,12 @@ async def lifespan(app: FastAPI):
     import asyncio
 
     # Start background ingestion scheduler (hourly re-sync, non-blocking)
-    from chief_of_staff.ingestion.scheduler import start_scheduler
-    start_scheduler()
-    logger.info("Background scheduler started")
+    if settings.enable_background_scheduler:
+        from chief_of_staff.ingestion.scheduler import start_scheduler
+        start_scheduler()
+        logger.info("Background scheduler started")
+    else:
+        logger.info("Background scheduler disabled (ENABLE_BACKGROUND_SCHEDULER=false)")
 
     # Recover queued/running async sub-agent runs after restarts
     try:

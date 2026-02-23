@@ -69,6 +69,11 @@
    - `scripts/state_drill.sh` (seed -> backup -> wipe -> restore -> verify)
    - `scripts/prefund_gate.sh` now runs drill by default (can skip with `PREFUND_SKIP_STATE_DRILL=1`)
    - `docs/PREFUND_VALIDATION.md` updated with durability pass criteria.
+18. Added non-Railway sandbox runtime manifests + runbook:
+   - `deploy/docker-compose.openclaw-local.yml` (gateway + optional worker profile + shared persistent `STATE_DIR` volume)
+   - `src/chief_of_staff/worker.py` dedicated scheduler worker entrypoint
+   - `ENABLE_BACKGROUND_SCHEDULER` config switch to split gateway/worker roles cleanly
+   - `docs/NON_RAILWAY_SANDBOX_RUNBOOK.md`
 
 ### In Progress
 1. Implement BlueBubbles outbound delivery parity hardening + operational pairing UX polish.
@@ -79,7 +84,7 @@
 1. Add exhaustive integration tests for approvals + budget-stop behavior under concurrent requests.
 2. Expand mapped hook transforms to include vetted module templates for key workflows.
 3. Wire voice transcript command flow (Recall/Zoom) into approval IDs + completion notification path.
-4. Add deployment manifests for non-Railway runtime (gateway + worker + persistent state volume) and cutover checklist runbook.
+4. Execute `docs/NON_RAILWAY_SANDBOX_RUNBOOK.md` in sandbox and capture health + prefund artifacts.
 5. Complete remaining P0 method parity buckets from `docs/OPENCLAW_ADOPTION_BLUEPRINT.md`.
 6. Execute pre-funding gate in staging before Anthropic re-fund.
 

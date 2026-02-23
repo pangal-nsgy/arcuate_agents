@@ -8,10 +8,12 @@ from dataclasses import dataclass
 
 from chief_of_staff.agent.rails import (
     get_rails,
-    set_command_exec_enabled,
     set_llm_enabled,
 )
+from chief_of_staff.communication.bluebubbles_pairing import get_bluebubbles_pairing_store
 from chief_of_staff.config import settings
+from chief_of_staff.gateway.exec_approvals import get_exec_approvals_service
+from chief_of_staff.gateway.usage_budget import get_usage_budget_service
 
 
 @dataclass
@@ -56,24 +58,43 @@ def _status_text() -> str:
     rails = get_rails()
     allowed = _authorized_phones()
     allowlist = ", ".join(settings.command_allowed_prefixes)
+    approvals = get_exec_approvals_service().get_policy()
+    policy = approvals["policy"]
     return (
         "Runtime status:\n"
         f"- llm_enabled={rails.llm_enabled}\n"
-        f"- command_exec_enabled={rails.command_exec_enabled}\n"
+        f"- command_exec_enabled={policy.get('execEnabled', False)}\n"
+        f"- require_approval_by_default={policy.get('requireApprovalByDefault', True)}\n"
+        f"- pending_approvals={approvals['pendingCount']}\n"
         f"- authorized_phone_count={len(allowed)}\n"
         f"- command_allowlist={allowlist}"
     )
 
 
-def _execute_command(command: str) -> str:
+def _execute_command(command: str, phone: str) -> str:
     if not _is_allowed_command(command):
         return "Command blocked by allowlist."
 
-    rails = get_rails()
-    if not rails.command_exec_enabled:
+    authorization = get_exec_approvals_service().authorize_command(command, requested_by=phone)
+    status = authorization.get("status")
+    if status == "paused":
+        return "Command execution is paused. Send '/resume exec' first, then retry."
+    if status == "denied":
+        return f"Command denied by approvals policy: {authorization.get('reason', 'denied')}."
+    if status == "needs_approval":
+        request_id = authorization.get("requestId", "")
         return (
-            "Command execution is paused. Send '/resume exec' first, then retry."
+            f"Approval required (id={request_id}). Resolve with exec.approval.resolve, then resend the same cmd."
         )
+
+    budget = get_usage_budget_service().check_and_consume(
+        session_key=phone,
+        run_id="control-cmd",
+        cost_usd=float(settings.usage_default_action_cost_usd),
+        reason="control command execution",
+    )
+    if not budget.get("allowed"):
+        return f"Budget exceeded at {budget.get('scope')} scope. Command blocked."
 
     try:
         completed = subprocess.run(
@@ -108,6 +129,7 @@ def handle_control_message(phone: str, body: str) -> ControlResult:
         message.startswith("/status")
         or message.startswith("/pause ")
         or message.startswith("/resume ")
+        or message.startswith("/pair ")
         or message.startswith("cmd:")
     )
     if not recognized:
@@ -143,22 +165,22 @@ def handle_control_message(phone: str, body: str) -> ControlResult:
         )
 
     if message == "/pause exec":
-        rails = set_command_exec_enabled(False)
+        policy = get_exec_approvals_service().set_policy({"execEnabled": False})["policy"]
         return ControlResult(
             handled=True,
             response=(
                 "Command execution paused.\n"
-                f"llm_enabled={rails.llm_enabled}, command_exec_enabled={rails.command_exec_enabled}"
+                f"llm_enabled={get_rails().llm_enabled}, command_exec_enabled={policy.get('execEnabled', False)}"
             ),
         )
 
     if message == "/resume exec":
-        rails = set_command_exec_enabled(True)
+        policy = get_exec_approvals_service().set_policy({"execEnabled": True})["policy"]
         return ControlResult(
             handled=True,
             response=(
                 "Command execution resumed.\n"
-                f"llm_enabled={rails.llm_enabled}, command_exec_enabled={rails.command_exec_enabled}"
+                f"llm_enabled={get_rails().llm_enabled}, command_exec_enabled={policy.get('execEnabled', False)}"
             ),
         )
 
@@ -166,13 +188,36 @@ def handle_control_message(phone: str, body: str) -> ControlResult:
         command = message[len("cmd:") :].strip()
         if not command:
             return ControlResult(handled=True, response="No command provided after 'cmd:'.")
-        return ControlResult(handled=True, response=_execute_command(command))
+        return ControlResult(handled=True, response=_execute_command(command, phone))
+
+    if message == "/pair list":
+        pending = get_bluebubbles_pairing_store().list_pending()
+        if not pending:
+            return ControlResult(handled=True, response="No pending BlueBubbles pairing requests.")
+        lines = ["Pending BlueBubbles pairing requests:"]
+        for item in pending[:20]:
+            lines.append(f"- {item['code']} -> {item['sender']}")
+        return ControlResult(handled=True, response="\n".join(lines))
+
+    if message.startswith("/pair approve "):
+        code = message[len("/pair approve ") :].strip()
+        sender = get_bluebubbles_pairing_store().approve(code)
+        if not sender:
+            return ControlResult(handled=True, response=f"Pairing code not found: {code}")
+        return ControlResult(handled=True, response=f"Approved BlueBubbles pairing for {sender}.")
+
+    if message.startswith("/pair deny "):
+        code = message[len("/pair deny ") :].strip()
+        sender = get_bluebubbles_pairing_store().deny(code)
+        if not sender:
+            return ControlResult(handled=True, response=f"Pairing code not found: {code}")
+        return ControlResult(handled=True, response=f"Denied BlueBubbles pairing for {sender}.")
 
     return ControlResult(
         handled=True,
         response=(
             "Unknown control command. Use /status, /pause llm, /resume llm, "
-            "/pause exec, /resume exec, or cmd: <command>."
+            "/pause exec, /resume exec, /pair list, /pair approve <code>, /pair deny <code>, "
+            "or cmd: <command>."
         ),
     )
-

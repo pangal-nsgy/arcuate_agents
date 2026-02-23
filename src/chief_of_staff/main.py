@@ -20,6 +20,7 @@ from chief_of_staff.webhooks.recall import router as recall_router
 from chief_of_staff.webhooks.bluebubbles import router as bluebubbles_router
 from chief_of_staff.gateway.hooks import router as hooks_router
 from chief_of_staff.gateway.tools_invoke import router as tools_invoke_router
+from chief_of_staff.gateway.openai_compat import router as openai_compat_router
 from chief_of_staff.dashboard.routes import router as dashboard_router
 
 
@@ -112,6 +113,7 @@ app.include_router(zoom_router)
 app.include_router(recall_router)
 app.include_router(hooks_router)
 app.include_router(tools_invoke_router)
+app.include_router(openai_compat_router)
 
 # Register dashboard
 app.include_router(dashboard_router)

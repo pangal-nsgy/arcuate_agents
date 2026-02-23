@@ -24,19 +24,46 @@
    - `src/chief_of_staff/ingestion/voice_commands.py`
    - wired into `src/chief_of_staff/webhooks/recall.py`
    - safe defaults: `VOICE_EXEC_ENABLED=false`, `VOICE_EXEC_DRY_RUN=true`
+8. Implemented full exec approvals model + persistent local store:
+   - `src/chief_of_staff/gateway/exec_approvals.py`
+   - `exec.approvals.get`
+   - `exec.approvals.set`
+   - `exec.approval.request`
+   - `exec.approval.waitDecision`
+   - `exec.approval.resolve`
+9. Replaced temporary command-exec runtime rail with approvals-enforced command flow:
+   - `src/chief_of_staff/communication/control_commands.py`
+10. Implemented mapped hooks parity:
+   - `POST /hooks/{name}` with mapping/template/transform behavior
+   - `src/chief_of_staff/gateway/hooks.py`
+11. Extended BlueBubbles parity:
+   - pairing model + persistent pairing store
+   - group policy (`allowlist/open/disabled`)
+   - mention gating
+   - `src/chief_of_staff/communication/bluebubbles_pairing.py`
+   - `src/chief_of_staff/webhooks/bluebubbles.py`
+12. Implemented usage/cost circuit breakers:
+   - `usage.status`
+   - `usage.cost`
+   - enforced run/session/day budget stops
+   - `src/chief_of_staff/gateway/usage_budget.py`
+13. Added OpenAI compatibility endpoints:
+   - `POST /v1/chat/completions`
+   - `POST /v1/responses`
+   - `src/chief_of_staff/gateway/openai_compat.py`
 
 ### In Progress
-1. Replace temporary rails toggles with full OpenClaw-style exec approvals model (`exec-approvals.json` equivalent).
-2. Expand hooks parity with mapped `POST /hooks/<name>` behavior.
-3. Implement full BlueBubbles pairing/group policy parity (currently scaffolded).
-4. Implement usage/cost endpoints and enforced budget circuit breakers.
-5. Implement voice response delivery loop (spoken acknowledgment + execution confirmation) after approvals parity.
+1. Implement BlueBubbles outbound delivery parity hardening + operational pairing UX polish.
+2. Implement voice response delivery loop (spoken acknowledgment + execution confirmation) after approvals parity.
+3. Add stricter OpenClaw-equivalent method parity for additional control-plane families (beyond current HTTP surface).
 
 ### Next Concrete Steps
-1. Implement persistent exec approval store + APIs (`exec.approvals.*`, `exec.approval.*`).
-2. Add `/v1/chat/completions` and `/v1/responses` gateway compatibility endpoints.
-3. Wire voice transcript command flow (Recall/Zoom) into hooks with approval-gated execution.
+1. Add exhaustive integration tests for approvals + budget-stop behavior under concurrent requests.
+2. Expand mapped hook transforms to include vetted module templates for key workflows.
+3. Wire voice transcript command flow (Recall/Zoom) into approval IDs + completion notification path.
 4. Add deployment manifests for non-Railway runtime (gateway + worker + postgres + redis) and cutover checklist runbook.
+5. Complete remaining P0 method parity buckets from `docs/OPENCLAW_ADOPTION_BLUEPRINT.md`.
 
 ### Known Runtime Inputs
 - Twilio secondary channel number provided: `+1 628-212-7401`.
+- OpenClaw upstream reference repo: `https://github.com/openclaw/openclaw`

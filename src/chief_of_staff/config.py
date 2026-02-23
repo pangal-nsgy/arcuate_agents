@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic_settings import BaseSettings
 
 
@@ -28,6 +30,14 @@ class Settings(BaseSettings):
     bluebubbles_server_url: str = ""
     bluebubbles_password: str = ""
     bluebubbles_webhook_secret: str = ""
+    bluebubbles_dm_policy: str = "pairing"  # pairing | allowlist | open
+    bluebubbles_allow_from: list[str] = []
+    bluebubbles_group_policy: str = "allowlist"  # allowlist | open | disabled
+    bluebubbles_group_allow_from: list[str] = []
+    bluebubbles_require_mention_in_groups: bool = True
+    bluebubbles_mention_keywords: list[str] = ["@chief", "chief of staff", "arcuate"]
+    bluebubbles_pairing_store_path: str = "./bluebubbles-pairing.json"
+    bluebubbles_pairing_code_ttl_minutes: int = 60
 
     # ElevenLabs
     elevenlabs_api_key: str = ""
@@ -85,6 +95,7 @@ class Settings(BaseSettings):
 
     # Gateway auth + HTTP tool policy (OpenClaw-style surface)
     gateway_auth_token: str = ""
+    exec_approvals_path: str = "./exec-approvals.json"
     gateway_tools_deny: list[str] = [
         "sessions_spawn",
         "sessions_send",
@@ -100,6 +111,15 @@ class Settings(BaseSettings):
     hooks_allow_request_session_key: bool = False
     hooks_default_session_key: str = "hook:ingress"
     hooks_allowed_session_key_prefixes: list[str] = ["hook:"]
+    hooks_transforms_dir: str = "./hooks/transforms"
+    hooks_mappings: list[dict[str, Any]] = []
+
+    # Usage and cost circuit breakers
+    usage_ledger_path: str = "./usage-ledger.json"
+    usage_default_action_cost_usd: float = 0.01
+    usage_run_budget_usd: float = 0.50
+    usage_session_budget_usd: float = 2.00
+    usage_day_budget_usd: float = 10.00
 
     # Voice command execution (meeting transcripts -> task execution)
     voice_exec_enabled: bool = False

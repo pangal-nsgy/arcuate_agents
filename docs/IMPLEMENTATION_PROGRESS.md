@@ -51,6 +51,9 @@
    - `POST /v1/chat/completions`
    - `POST /v1/responses`
    - `src/chief_of_staff/gateway/openai_compat.py`
+14. Added pre-funding validation gate artifacts:
+   - `docs/PREFUND_VALIDATION.md`
+   - `scripts/prefund_gate.sh`
 
 ### In Progress
 1. Implement BlueBubbles outbound delivery parity hardening + operational pairing UX polish.
@@ -63,6 +66,7 @@
 3. Wire voice transcript command flow (Recall/Zoom) into approval IDs + completion notification path.
 4. Add deployment manifests for non-Railway runtime (gateway + worker + postgres + redis) and cutover checklist runbook.
 5. Complete remaining P0 method parity buckets from `docs/OPENCLAW_ADOPTION_BLUEPRINT.md`.
+6. Execute pre-funding gate in staging before Anthropic re-fund.
 
 ### Known Runtime Inputs
 - Twilio secondary channel number provided: `+1 628-212-7401`.

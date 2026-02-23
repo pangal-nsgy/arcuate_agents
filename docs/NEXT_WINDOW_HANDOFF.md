@@ -49,6 +49,9 @@
    - `src/chief_of_staff/gateway/openai_compat.py`
    - `/v1/chat/completions`
    - `/v1/responses`
+15. Pre-funding validation gate:
+   - `docs/PREFUND_VALIDATION.md`
+   - `scripts/prefund_gate.sh`
 
 ## Current Safety Defaults
 - LLM inbound: off by default unless explicitly resumed.
@@ -61,6 +64,7 @@
 3. Complete remaining P0 control-plane parity gaps referenced in `docs/OPENCLAW_ADOPTION_BLUEPRINT.md`.
 4. Wire voice transcript command execution to approval IDs and delivery confirmations.
 5. Add non-Railway runtime deployment manifests + cutover runbook.
+6. Run `docs/PREFUND_VALIDATION.md` in staging and only then re-fund Anthropic.
 
 ## Twilio Note
 - Secondary number provided by user: `+1 628-212-7401`

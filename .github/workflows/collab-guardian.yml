@@ -60,9 +60,10 @@ jobs:
           echo "changed_files<<EOF" >> "$GITHUB_OUTPUT"
           echo "$CHANGED" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
-          FILE_COUNT=$(echo "$CHANGED" | grep -c '.' || echo "0")
+          FILE_COUNT=$(printf "%s\n" "$CHANGED" | awk 'NF{c++} END{print c+0}')
           echo "file_count=$FILE_COUNT" >> "$GITHUB_OUTPUT"
-          COMMIT_COUNT=$(git rev-list --count "origin/$DEPLOY_BRANCH..HEAD" 2>/dev/null || echo "1")
+          COMMIT_COUNT=$(git rev-list --count "origin/$DEPLOY_BRANCH..HEAD" 2>/dev/null)
+          COMMIT_COUNT=${COMMIT_COUNT:-1}
           echo "commit_count=$COMMIT_COUNT" >> "$GITHUB_OUTPUT"
           echo "is_pr=${{ github.event_name == 'pull_request' }}" >> "$GITHUB_OUTPUT"
 

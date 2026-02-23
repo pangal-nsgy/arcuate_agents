@@ -1,357 +1,308 @@
-# OpenClaw Adoption Blueprint for Arcuate
+# OpenClaw Adoption Blueprint for Arcuate (Strict Parity Edition)
 
-## Objective
-Replatform `arcuate_agents` so the runtime is effectively **OpenClaw-compatible by default** (control plane, safety rails, plugin model, subagents, session tooling), then layer Arcuate-specific workflows on top.
+## 0) Execution Policy (Non-Negotiable)
 
-This plan assumes:
-- We prioritize **feature parity** with OpenClaw over preserving current Python architecture.
-- We keep Arcuate domain logic (Gmail/Drive corpus workflows, healthcare-specific processes) as custom tools/plugins/workflows.
-- We treat safety, cost caps, and kill switches as first-class requirements.
+We are not "inspired by" OpenClaw. We are **copying OpenClaw behavior by default**.
 
----
+For every capability:
+1. Define the business goal.
+2. Document exactly how OpenClaw implements it (code/docs reference).
+3. Implement the same behavior in Arcuate.
+4. If behavior differs, add a written variance with a business/safety reason.
 
-## 1) Recommended Strategy
-
-## 1.1 Replatform, don’t retrofit
-Your current Python codebase is small and single-agent. OpenClaw is a large, opinionated TypeScript platform with:
-- WS gateway control plane
-- HTTP API/webhook ingress
-- plugin-based channels/tools
-- embedded coding-agent runtime
-- approvals + sandbox + policy stack
-- subagent orchestration
-
-Trying to “port features” into the current code incrementally will be slower and less reliable than adopting OpenClaw architecture directly.
-
-**Recommendation:**
-1. Create a new runtime layer in-repo (`platform/openclaw_core`) using OpenClaw patterns.
-2. Move Arcuate logic into extensions/plugins/workflows.
-3. Keep current Python service only as a temporary adapter during migration.
+No variance is allowed without explicit justification in this document.
 
 ---
 
-## 2) OpenClaw Surfaces to Copy (Rails + Interfaces)
+## 1) Critical Corrections (from previous draft)
 
-## 2.1 Server surfaces
-OpenClaw runs one gateway that multiplexes WS + HTTP.
+1. iPhone/iMessage path: **BlueBubbles is primary** (not Twilio).
+2. Legacy iMessage (`imsg`) is fallback only.
+3. Twilio is optional for SMS/voice workflows, not the core iMessage path.
+4. Rails and approvals must match OpenClaw semantics first, then Arcuate adds domain tooling.
 
-### WebSocket control plane
-- Single WS endpoint (upgrade on gateway host/port).
-- Uses request/response/event frames.
-- First frame is `connect` with role/scopes/device identity.
-
-### HTTP endpoints (core)
-- `POST /hooks/wake`
-- `POST /hooks/agent`
-- `POST /hooks/<mapped-name>` (mapping transform pipeline)
-- `POST /tools/invoke`
-- `POST /v1/chat/completions` (optional; OpenAI-compatible)
-- `POST /v1/responses` (optional; OpenResponses-compatible)
-- Canvas host routes:
-  - `/__openclaw__/canvas/`
-  - `/__openclaw__/a2ui/`
-- Control UI routes (base path configurable)
-- Channel/plugin HTTP routes under `/api/channels/*` (gateway-auth protected)
-
-## 2.2 RPC method surface (WS)
-OpenClaw exposes broad methods. Minimum parity buckets to copy:
-- Health/status: `health`, `status`, usage methods
-- Config/control-plane: `config.get/set/apply/patch`, `update.run`
-- Agent/chat: `agent`, `agent.wait`, `chat.send`, `chat.abort`, `chat.history`
-- Sessions: `sessions.list/preview/patch/reset/delete/compact`
-- Subagent support via tools + session APIs
-- Approvals: `exec.approval.request/waitDecision/resolve`, `exec.approvals.*`
-- Node/device: pairing, invoke, events
-- Models/skills: `models.list`, `skills.*`, `agents.*`
-
-Source of truth in OpenClaw: `src/gateway/server-methods-list.ts` and `src/gateway/server-methods.ts`.
-
-## 2.3 Webhook system
-Copy these webhook characteristics:
-- Token-authenticated (`Authorization: Bearer` or `x-openclaw-token`)
-- Query token rejection (prevents accidental leakage)
-- Request size limits, timeout handling
-- Mapping/transforms pipeline (`/hooks/<name>`)
-- Isolated async runs with returned `runId`
-- Optional fixed/guarded session keys (`allowRequestSessionKey=false` by default)
+OpenClaw references:
+- `docs/channels/bluebubbles.md` (recommended iMessage integration, webhook auth expectations)
+- `docs/channels/imessage.md` (legacy path)
 
 ---
 
-## 3) Safety and Cost Rails to Copy First
+## 2) Goal -> OpenClaw -> Arcuate Mapping Matrix
 
-## 3.1 Mandatory hard controls
-1. Global panic switch:
-- disable outbound messaging
-- disable `exec`
-- disable subagent spawn
-- abort all active runs
+## 2.1 Founder can text agent from iPhone (primary win)
+- Goal:
+  - Founder sends/receives agent messages in iMessage.
+- OpenClaw implementation:
+  - BlueBubbles channel plugin, webhook ingress + REST send APIs.
+  - Pairing/allowlist/group policy/mention gating handled at channel layer.
+  - References: `docs/channels/bluebubbles.md`, `src/imessage/**`, `src/channels/**`.
+- Arcuate implementation:
+  - Build `channels.bluebubbles` adapter first.
+  - Implement identical DM policy and group policy controls.
+  - Keep legacy Twilio webhook only as optional secondary transport.
+- Variance:
+  - None planned for core behavior.
+  - Optional Twilio kept for non-iMessage use cases (sales/outbound voice/SMS).
 
-2. Budget circuit breakers:
-- hard daily/weekly spend cap per provider/model
-- per-run token cap
-- per-session token cap
-- max tool-calls/run
+## 2.2 Webhook ingress rails (anti-abuse + deterministic routing)
+- Goal:
+  - Inbound webhook traffic cannot bypass auth/policy and cannot force unbounded sessions.
+- OpenClaw implementation:
+  - `/hooks/wake`, `/hooks/agent`, mapped `/hooks/<name>`.
+  - Header token auth only, query token rejected.
+  - Request auth rate limiting and request-size caps.
+  - `allowRequestSessionKey=false` default.
+  - References: `docs/automation/webhook.md`, `src/gateway/server-http.ts`.
+- Arcuate implementation:
+  - Mirror same route shape and defaults.
+  - Separate hook token from gateway token.
+  - Default fixed `hooks.defaultSessionKey="hook:ingress"` and no request override.
+- Variance:
+  - None.
 
-3. Execution controls:
-- allowlist-based exec approvals
-- safe bins profile system (no interpreter bins without explicit hardened profiles)
-- sandbox-by-default for non-main sessions
+## 2.3 Direct tool execution endpoint with hard deny list
+- Goal:
+  - Enable automation while preventing high-risk tool invocation over HTTP.
+- OpenClaw implementation:
+  - `POST /tools/invoke` with gateway auth + policy filtering.
+  - Default HTTP deny list for high-risk tools (`sessions_spawn`, `sessions_send`, `gateway`, `whatsapp_login`).
+  - 404 on policy-denied/unavailable tools.
+  - References: `docs/gateway/tools-invoke-http-api.md`, `src/gateway/tools-invoke-http.ts`.
+- Arcuate implementation:
+  - Copy endpoint contract and deny-list behavior.
+  - Keep deny list default-closed; require explicit override.
+- Variance:
+  - Add Arcuate-specific dangerous tools to deny list once introduced.
+  - Reason: Arcuate will add CRM/billing/email mutation tools not present upstream.
 
-4. Sender/channel controls:
-- DM pairing or allowlist by default
-- group policy (`allowlist/open/disabled`) + mention gating
+## 2.4 Exec approvals (code execution rails)
+- Goal:
+  - Agent can execute code only under policy + approval + allowlist controls.
+- OpenClaw implementation:
+  - Host-local `exec-approvals.json` policy, per-agent allowlists.
+  - `security: deny | allowlist | full`, ask modes, fallback behavior.
+  - Safe-bin profiles and explicit protections against wrapper/shell bypasses.
+  - References: `docs/tools/exec-approvals.md`, `src/gateway/server-methods-list.ts` (`exec.approval.*`, `exec.approvals.*`).
+- Arcuate implementation:
+  - Port this model directly (no ad-hoc boolean flags as final architecture).
+  - Keep strict defaults: `deny` + ask-fallback deny.
+  - Add approval UI/event transport in control channel.
+- Variance:
+  - Temporary (current): local runtime toggles for kill-switch bootstrapping.
+  - Reason: immediate spend protection while full OpenClaw-style approvals are implemented.
 
-5. Control-plane auth:
-- token/password auth for WS/HTTP
-- brute-force rate limiting
-- strict trusted proxy handling
+## 2.5 System prompt + SOUL.md identity model
+- Goal:
+  - Agent identity is persistent, explicit, and controlled (not hidden in code prompts).
+- OpenClaw implementation:
+  - System prompt assembled by runtime from fixed sections + workspace bootstrap files.
+  - Includes `SOUL.md`, `AGENTS.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, etc.
+  - Subagents use reduced prompt mode and smaller bootstrap set.
+  - References: `docs/concepts/system-prompt.md`, `src/agents/system-prompt.ts`, `src/agents/workspace.ts`, `docs/reference/templates/SOUL.md`.
+- Arcuate implementation:
+  - Move agent identity into workspace bootstrap files.
+  - Keep `SOUL.md` as first-class persona/boundary source.
+  - Implement prompt-mode differences for subagents.
+- Variance:
+  - None.
 
-## 3.2 Runtime kill commands
-Implement operator commands equivalent to:
-- `/stop` (per-session abort + child subagent cascade)
-- global `panic on/off`
-- `subagents kill all`
+## 2.6 Subagent swarm behavior (boss + workers)
+- Goal:
+  - Boss agent spawns worker agents, workers complete tasks, results route back safely.
+- OpenClaw implementation:
+  - `sessions_spawn` creates isolated subagent sessions.
+  - Depth and fan-out limits (`maxSpawnDepth`, `maxChildrenPerAgent`, `maxConcurrent`).
+  - Announce chain and cascade kill behavior.
+  - References: `docs/tools/subagents.md`, `src/gateway/server-methods-list.ts` (sessions methods), `src/agents/**` session/subagent flow.
+- Arcuate implementation:
+  - Keep same lifecycle: spawn -> isolated run -> announce -> archive.
+  - Set conservative defaults initially: depth=2, children=3, concurrent=4.
+- Variance:
+  - Lower concurrency defaults than OpenClaw examples.
+  - Reason: cost containment while proving workflow quality.
 
----
+## 2.7 Channel policy and anti-loop protections
+- Goal:
+  - Prevent bot loops and unauthorized command execution in channels.
+- OpenClaw implementation:
+  - DM policy + allowlists + pairing model.
+  - Group policy (`allowlist|open|disabled`) and mention gating.
+  - Per-channel controls and role/sender ID normalization.
+  - References: `docs/channels/bluebubbles.md`, `docs/channels/pairing.md`, `docs/channels/group-messages.md`, `docs/channels/channel-routing.md`.
+- Arcuate implementation:
+  - Copy policy model exactly for iMessage and Slack.
+  - Commands require explicit authorization; mention gating on group contexts.
+- Variance:
+  - None.
 
-## 4) Integration Architecture to Copy (Plug-and-Play)
-
-## 4.1 Plugin model
-Adopt extension packages for:
-- channels (iMessage/BlueBubbles, Slack, Discord, Telegram, etc.)
-- tool bundles (Gmail/Drive/Docs/Zoom/CRM)
-- hook packs
-
-## 4.2 Channel adapter contract
-Each channel plugin should implement:
-- config schema
-- sender identity normalization
-- DM/group policy handling
-- outbound send/reply/media support
-- optional reactions/actions
-- runtime health/probe
-- onboarding helper
-
-## 4.3 Tool architecture
-- Core coding tools (`read/write/edit/apply_patch/exec/process`) with policy wrapper.
-- OpenClaw-like tools (`sessions_*`, `subagents`, `message`, `gateway`, `web_*`).
-- Arcuate domain tools as separate plugins:
-  - `arcuate_gmail`
-  - `arcuate_drive`
-  - `arcuate_docs`
-  - `arcuate_corpus_builder`
-  - `arcuate_client_ops`
-
----
-
-## 5) Arcuate Swarm Model (Target)
-
-## 5.1 Agent classes
-1. `boss` agent:
-- receives founder requests
-- decomposes into plans
-- spawns workers
-- synthesizes and returns final output
-
-2. `worker` agents (ephemeral):
-- task-scoped capabilities
-- strict timeout and budget
-- auto-cleanup/archive
-
-3. `specialist` agents (optional):
-- corpus specialist
-- outbound specialist
-- analytics specialist
-
-## 5.2 Spawn policy
-- `maxSpawnDepth`: 2 initially
-- `maxChildrenPerAgent`: 3 initially
-- separate queue lanes for `main`, `subagent`, `cron`
-
-## 5.3 Announce model
-- workers announce completion to parent session
-- parent decides what reaches founder
-- no direct worker-to-user sends without explicit policy
-
----
-
-## 6) Migration Plan (Execution)
-
-## Phase 0: Foundation and governance (Week 1)
-Deliverables:
-- Create `platform/openclaw_core` service skeleton (TS monorepo or package).
-- Define parity matrix: OpenClaw feature -> Arcuate implementation status.
-- Add security policy baseline and SLOs.
-
-Acceptance criteria:
-- architecture decision record approved
-- parity tracker checked into repo
-
-## Phase 1: Rails-first gateway (Weeks 2-3)
-Deliverables:
-- WS gateway + auth + scope model
-- HTTP routes:
-  - `/hooks/*`
-  - `/tools/invoke`
-  - `/v1/chat/completions` (optional on)
-  - `/v1/responses` (optional on)
-- kill switch + abort APIs
-- spend/token budget manager
-
-Acceptance criteria:
-- panic switch tested end-to-end
-- budget cap reliably halts runs
-- webhook auth/rate-limit tests passing
-
-## Phase 2: Core agent runtime parity (Weeks 4-6)
-Deliverables:
-- System prompt assembly model (with AGENTS/SOUL/TOOLS/MEMORY bootstraps)
-- Tool policy pipeline (global + per-agent + per-group + subagent-depth)
-- exec approvals and safe bins
-- session store + compaction + `/stop`
-
-Acceptance criteria:
-- can run coding loop with controlled tool execution
-- policy denials enforce hard boundaries
-
-## Phase 3: Subagents and orchestration (Weeks 7-8)
-Deliverables:
-- `sessions_spawn`, `subagents`, `sessions_send/history/list`
-- parent-child lifecycle registry
-- cascade kill + announce + auto-archive
-
-Acceptance criteria:
-- boss->worker->boss loop works with timeout and cleanup
-- nested depth limits enforced
-
-## Phase 4: Channel migration (Weeks 9-10)
-Deliverables:
-- BlueBubbles (recommended iMessage path) as primary founder interface
-- Slack channel plugin (secondary)
-- Discord optional/deprioritized
-
-Acceptance criteria:
-- founders operate through iMessage with pairing/allowlist and group safety
-
-## Phase 5: Arcuate domain layer (Weeks 11-13)
-Deliverables:
-- corpus workflow tools
-- client onboarding packet generator workflow
-- Gmail/Drive/Docs ingestion + transformation pipelines as tools/hooks
-
-Acceptance criteria:
-- “Michelle corpus” workflow runs via spawned worker and produces deterministic outputs
-
-## Phase 6: Cutover and decommission (Weeks 14-15)
-Deliverables:
-- canary rollout
-- incident runbooks
-- deprecate old Python direct-exec paths
-
-Acceptance criteria:
-- production traffic on new gateway
-- old stack read-only/decommissioned
+## 2.8 Gateway control plane parity
+- Goal:
+  - Arcuate has OpenClaw-equivalent runtime control surfaces.
+- OpenClaw implementation:
+  - WebSocket RPC method families for health/config/agent/sessions/exec approvals/nodes/cron.
+  - References: `src/gateway/server-methods-list.ts`, `src/gateway/server-methods.ts`, `docs/gateway/protocol.md`.
+- Arcuate implementation:
+  - Implement method parity in priority buckets (P0-P2 below).
+- Variance:
+  - P2 methods may be deferred; document every defer.
 
 ---
 
-## 7) Concrete Backlog (First 30 days)
+## 3) Mandatory Method/Endpoint Parity Scope
 
-## Sprint A
-- Implement gateway auth and connect protocol.
-- Implement `/hooks/wake`, `/hooks/agent` with token and payload limits.
-- Implement panic switch + run abort registry.
-- Add cost ledger schema and provider budget checks.
+## 3.1 P0 (must exist before enabling paid LLM usage)
+1. `health`, `status`, `usage.status`, `usage.cost`
+2. `config.get`, `config.set`, `config.apply`, `config.patch`
+3. `agent`, `agent.wait`, `chat.send`, `chat.abort`, `chat.history`
+4. `sessions.list`, `sessions.preview`, `sessions.patch`, `sessions.reset`, `sessions.delete`, `sessions.compact`
+5. `exec.approval.request`, `exec.approval.waitDecision`, `exec.approval.resolve`
+6. `exec.approvals.get`, `exec.approvals.set`
+7. HTTP: `/hooks/wake`, `/hooks/agent`, `/tools/invoke`
+8. Channel ingress: BlueBubbles webhook endpoint with strict auth
 
-## Sprint B
-- Add tool policy layer and deny-by-default dangerous tools.
-- Implement `exec` wrapper with approval request/resolve flow.
-- Add `/tools/invoke` with HTTP deny list.
-- Add session store + `chat.send`, `chat.abort`, `chat.history`.
+Reference:
+- `src/gateway/server-methods-list.ts`
+- `src/gateway/server-http.ts`
 
-## Sprint C
-- Add `sessions_*` tools and `sessions_spawn`.
-- Add subagent registry, announce flow, cascade kill.
-- Integrate BlueBubbles plugin.
+## 3.2 P1 (before production cutover)
+1. OpenAI-compatible HTTP endpoints: `/v1/chat/completions`, `/v1/responses`
+2. `update.run`, `models.list`, `agents.list`, `agents.create/update/delete`
+3. cron jobs + webhook notifications
+4. node/device pairing flows (if using remote nodes)
 
----
-
-## 8) Repo Structure Proposal
-
-```text
-arcuate_agents/
-  docs/
-    OPENCLAW_ADOPTION_BLUEPRINT.md
-    parity/
-      openclaw_parity_matrix.md
-  platform/
-    openclaw_core/
-      gateway/
-      agents/
-      channels/
-      tools/
-      hooks/
-      security/
-  integrations/
-    arcuate_gmail/
-    arcuate_drive/
-    arcuate_docs/
-    arcuate_zoom/
-  workflows/
-    corpus_builder/
-    onboarding_packet/
-  legacy_python/
-    (current src/chief_of_staff during migration window)
-```
+## 3.3 P2 (after cutover)
+1. Extended channel/plugin ecosystem
+2. canvas/a2ui hosting parity
+3. non-critical method families
 
 ---
 
-## 9) Build-vs-Copy Decision
+## 4) Implementation Sequence (Strict, Gate-Based)
 
-## Preferred
-- **Fork OpenClaw** as upstream base and maintain an `arcuate` branch.
-- Add Arcuate plugins/workflows in-tree.
-- Periodically merge upstream OpenClaw.
+## Phase A: Parity Harness + Freeze
+- Deliverables:
+  1. Create `docs/parity/openclaw_parity_matrix.md` with every method/endpoint/tool.
+  2. Mark each item: `missing | partial | parity | variance-approved`.
+  3. Freeze new feature work not in parity scope.
+- Exit gate:
+  - Parity matrix complete and reviewed.
 
-## Fallback
-- Re-implement from scratch using OpenClaw design references.
-- Higher risk, slower parity, more maintenance debt.
+## Phase B: Channel First-Win (iMessage via BlueBubbles)
+- Deliverables:
+  1. BlueBubbles adapter with webhook auth + DM/group policy + pairing.
+  2. Founders can send `/status` equivalent and get deterministic reply.
+  3. Basic reply loop (inbound iMessage -> agent -> outbound iMessage).
+- Exit gate:
+  - iPhone loop works end-to-end in staging with no Discord dependency.
+
+## Phase C: Rails Core (before Anthropic re-fund)
+- Deliverables:
+  1. Exec approvals model (OpenClaw-style) wired and enforced.
+  2. `/tools/invoke` deny-list parity.
+  3. Budget caps (daily/session/run) + run abort + global panic.
+- Exit gate:
+  - Forced loop simulation cannot exceed configured budget and auto-aborts.
+
+## Phase D: SOUL + Prompt + Subagent Runtime
+- Deliverables:
+  1. Workspace bootstrap injection parity (`SOUL.md`, `AGENTS.md`, etc.).
+  2. Subagent prompt-mode parity.
+  3. `sessions_spawn` + announce chain + cascade kill.
+- Exit gate:
+  - Boss->worker workflow completes and worker auto-shutdown is verified.
+
+## Phase E: Arcuate Domain Tools (after parity)
+- Deliverables:
+  1. `arcuate_gmail`, `arcuate_drive`, `arcuate_docs`, `arcuate_corpus_builder` tools.
+  2. “Michelle docs -> corpus doc” flow as scripted task.
+- Exit gate:
+  - Deterministic corpus generation test passes from iMessage trigger.
 
 ---
 
-## 10) Non-Negotiable Policies for Production
+## 5) Variance Register (Required for any differences)
 
-1. `exec` requires approval unless explicit allowlist hit and policy permits.
-2. Default DM policy is `pairing` or strict allowlist.
-3. Group replies require mention unless explicitly exempted.
-4. `sessions_spawn` capped by depth/concurrency/children.
-5. Provider spend cap enforced before model call.
-6. Global panic switch available to founders/operators.
-7. Full audit trail for tool calls, approvals, outbound actions.
+Use this template for every divergence from OpenClaw behavior:
 
----
+- Capability:
+- OpenClaw behavior (source):
+- Arcuate behavior:
+- Why variance is required:
+- Risk introduced:
+- Compensating control:
+- Owner:
+- Review date:
 
-## 11) Immediate Next Steps
-
-1. Approve replatform decision (`fork/adopt OpenClaw core` vs `rebuild`).
-2. Open 4 epic tickets:
-- `EPIC-1 Gateway + Rails`
-- `EPIC-2 Agent Runtime + Tool Policy`
-- `EPIC-3 Subagents + Swarm`
-- `EPIC-4 iMessage + Arcuate Workflows`
-3. Create parity matrix from OpenClaw method/endpoint/tool surfaces.
-4. Implement panic switch + budget caps before enabling autonomous execution.
+Current approved variances:
+1. Temporary local kill-switch toggles exist before full exec-approvals parity.
+2. Initial subagent concurrency lower than OpenClaw examples to reduce spend risk.
 
 ---
 
-## Reference inventory used for this plan
-- OpenClaw gateway HTTP routing: `src/gateway/server-http.ts`
-- OpenClaw RPC method index: `src/gateway/server-methods-list.ts`
-- Gateway method dispatcher: `src/gateway/server-methods.ts`
-- Webhooks docs: `docs/automation/webhook.md`
-- OpenAI-compatible API docs: `docs/gateway/openai-http-api.md`
-- OpenResponses API docs: `docs/gateway/openresponses-http-api.md`
-- Tools invoke docs: `docs/gateway/tools-invoke-http-api.md`
-- Protocol docs: `docs/gateway/protocol.md`
-- Network model docs: `docs/gateway/network-model.md`
-- Channel index docs: `docs/channels/index.md`
-- Exec approvals and security docs: `docs/tools/exec-approvals.md`, `docs/gateway/security/index.md`
+## 6) Safety Rules Before Re-Enabling Paid Models
+
+Do not re-fund Anthropic until all are true:
+1. BlueBubbles ingress works in staging with auth enabled.
+2. P0 parity endpoints/methods implemented.
+3. Exec approvals enforced with deny-by-default.
+4. Budget circuit breaker tested (hard stop confirmed).
+5. Panic switch tested (active runs aborted, outbound blocked).
+6. Loop simulation test passes (no runaway recursion).
+
+---
+
+## 7) Concrete Next 10 Tasks (exact order)
+
+1. Implement BlueBubbles channel adapter skeleton (`channels.bluebubbles`) and webhook auth.
+2. Add pairing + allowlist + group policy controls matching OpenClaw docs.
+3. Replace Twilio-first founder path with BlueBubbles-first route in runtime config.
+4. Implement `/hooks/wake` and `/hooks/agent` with OpenClaw auth/session-key constraints.
+5. Implement `/tools/invoke` with default deny list parity.
+6. Build persistent exec approvals store (`exec-approvals.json` equivalent).
+7. Wire `exec.approval.*` request/wait/resolve method flow.
+8. Add usage/cost accounting (`usage.status`, `usage.cost`) and hard budget stops.
+9. Port workspace bootstrap injection (`SOUL.md`, `AGENTS.md`, `TOOLS.md`, etc.).
+10. Implement `sessions_spawn` + announce + cascade kill for boss/worker flow.
+
+---
+
+## 8) OpenClaw Source Reference Index (used by this plan)
+
+Channels / iMessage:
+- `docs/channels/bluebubbles.md`
+- `docs/channels/imessage.md`
+- `docs/channels/pairing.md`
+- `docs/channels/group-messages.md`
+- `docs/channels/channel-routing.md`
+
+Gateway / control plane:
+- `src/gateway/server-methods-list.ts`
+- `src/gateway/server-methods.ts`
+- `src/gateway/server-http.ts`
+- `docs/gateway/protocol.md`
+- `docs/gateway/network-model.md`
+
+HTTP APIs:
+- `docs/automation/webhook.md`
+- `docs/gateway/tools-invoke-http-api.md`
+- `docs/gateway/openai-http-api.md`
+- `docs/gateway/openresponses-http-api.md`
+
+Exec rails:
+- `docs/tools/exec-approvals.md`
+- `docs/gateway/security/index.md`
+
+Prompt / identity / SOUL:
+- `docs/concepts/system-prompt.md`
+- `docs/reference/templates/SOUL.md`
+- `src/agents/system-prompt.ts`
+- `src/agents/workspace.ts`
+
+Subagents:
+- `docs/tools/subagents.md`
+
+Creator principles context (why this matters):
+- `https://lexfridman.com/peter-steinberger`
+- `https://lexfridman.com/peter-steinberger-transcript`
+  - Interpreted planning principles used here: “AI that does things”, practical integrations, and strong operator control rails.
+

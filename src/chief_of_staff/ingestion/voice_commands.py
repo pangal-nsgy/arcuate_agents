@@ -7,6 +7,7 @@ import logging
 from chief_of_staff.agent.activity import WEBHOOK_RECEIVED, log_activity
 from chief_of_staff.agent.core import get_agent
 from chief_of_staff.config import settings
+from chief_of_staff.gateway.exec_approvals import get_exec_approvals_service
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,20 @@ async def handle_transcript_command(bot_id: str, speaker: str, text: str) -> str
         return ""
 
     session_key = f"hook:voice:{bot_id}"
+    requested_by = f"voice:{speaker}:{bot_id}"
+    approvals = get_exec_approvals_service()
+    request = approvals.request_approval(
+        {
+            "request": {
+                "tool": "voice.command",
+                "command": command,
+                "requestedBy": requested_by,
+                "reason": "voice transcript command",
+                "metadata": {"bot_id": bot_id, "speaker": speaker},
+            }
+        }
+    )
+    request_id = str(request["requestId"])
     log_activity(
         agent_name="chief_of_staff",
         action_type=WEBHOOK_RECEIVED,
@@ -51,11 +66,18 @@ async def handle_transcript_command(bot_id: str, speaker: str, text: str) -> str
         channel="voice",
         user_id=speaker,
         session_id=session_key,
-        metadata={"bot_id": bot_id, "dry_run": settings.voice_exec_dry_run},
+        metadata={"bot_id": bot_id, "dry_run": settings.voice_exec_dry_run, "approval_id": request_id},
     )
 
     if settings.voice_exec_dry_run:
-        return f"[dry-run] Voice command accepted: {command}"
+        return f"[dry-run] Voice command queued for approval id={request_id}: {command}"
+
+    decision = approvals.wait_decision({"requestId": request_id, "timeoutMs": settings.voice_approval_wait_ms})
+    status = str(decision.get("status", "pending"))
+    if status == "pending":
+        return f"Approval required (id={request_id}) for voice command: {command}"
+    if status == "denied":
+        return f"Voice command denied (id={request_id})."
 
     agent = get_agent()
     result = await agent.respond(
@@ -64,6 +86,5 @@ async def handle_transcript_command(bot_id: str, speaker: str, text: str) -> str
         user_id=speaker,
         session_id=session_key,
     )
-    logger.info("Executed voice command for bot %s speaker %s", bot_id[:8], speaker)
-    return result
-
+    logger.info("Executed voice command for bot %s speaker %s approval %s", bot_id[:8], speaker, request_id)
+    return f"Voice command executed (id={request_id}): {result}"

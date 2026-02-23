@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     voice_exec_dry_run: bool = True
     voice_command_prefixes: list[str] = ["agent execute", "execute task"]
     voice_allowed_speakers: list[str] = []
+    voice_approval_wait_ms: int = 10
 
     # Runtime rails / kill switches
     llm_inbound_enabled: bool = False

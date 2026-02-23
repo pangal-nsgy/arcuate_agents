@@ -30,6 +30,9 @@ Confirm rails/parity in a sandbox or staging environment before paid-model spend
 - `/v1/responses`
 6. Voice command safety:
 - transcript command returns approval id and deterministic pending/approved/denied confirmation.
+7. State durability drill:
+- backup/restore succeeds for `STATE_DIR`.
+- restored SQLite + approvals + ledgers + pairing files are readable and consistent.
 
 ## Runbook
 1. Set sandbox/staging env vars:
@@ -40,17 +43,25 @@ Confirm rails/parity in a sandbox or staging environment before paid-model spend
   - `USAGE_RUN_BUDGET_USD`
   - `USAGE_SESSION_BUDGET_USD`
   - `USAGE_DAY_BUDGET_USD`
-2. Run local parity test suite:
+2. Run state durability drill:
+```bash
+bash scripts/state_drill.sh
+```
+3. Run local parity test suite:
 ```bash
 PYTHONPATH=src pytest -q tests/test_gateway_hooks_and_tools.py tests/test_bluebubbles_webhook.py tests/test_control_commands.py tests/test_voice_commands.py
 ```
-3. Run pre-fund script:
+4. Run pre-fund script:
 ```bash
 bash scripts/prefund_gate.sh
 ```
-4. If validating deployed staging:
+5. If validating deployed staging:
 ```bash
 BASE_URL="https://<staging-host>" GATEWAY_AUTH_TOKEN="<token>" HOOKS_TOKEN="<token>" bash scripts/prefund_gate.sh
+```
+6. Optional: skip drill inside prefund gate if you already ran it:
+```bash
+PREFUND_SKIP_STATE_DRILL=1 bash scripts/prefund_gate.sh
 ```
 
 ## Funding Decision

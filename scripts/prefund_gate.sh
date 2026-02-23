@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+if [[ "${PREFUND_SKIP_STATE_DRILL:-0}" != "1" ]]; then
+  echo "[prefund] running state backup/restore drill..."
+  bash scripts/state_drill.sh
+fi
+
 echo "[prefund] running parity-focused tests..."
 PYTHONPATH=src pytest -q \
   tests/test_gateway_hooks_and_tools.py \

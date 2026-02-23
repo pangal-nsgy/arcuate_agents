@@ -59,6 +59,10 @@
    - SQLite runtime policy (`src/chief_of_staff/knowledge/sqlite_runtime.py`)
    - schema migrations (`src/chief_of_staff/knowledge/migrations/0001_initial_schema.sql`)
    - state backup/restore scripts (`scripts/state_backup.sh`, `scripts/state_restore.sh`)
+18. Automated state durability drill:
+   - `scripts/state_drill.sh`
+   - wired into `scripts/prefund_gate.sh` (default on, opt-out via `PREFUND_SKIP_STATE_DRILL=1`)
+   - pass criteria reflected in `docs/PREFUND_VALIDATION.md`
 
 ## Current Safety Defaults
 - LLM inbound: off by default unless explicitly resumed.
@@ -71,8 +75,9 @@
 3. Complete remaining P0 control-plane parity gaps referenced in `docs/OPENCLAW_ADOPTION_BLUEPRINT.md`.
 4. Wire voice transcript command execution to approval IDs and delivery confirmations.
 5. Add non-Railway runtime deployment manifests + cutover runbook.
-6. Run backup/restore drill on staging `STATE_DIR` and verify restart consistency.
-7. Run `docs/PREFUND_VALIDATION.md` in staging and only then re-fund Anthropic.
+6. Execute full staging pre-fund gate with real staging tokens and capture logs/artifacts.
+7. Verify one founder real E2E flow (iMessage ingress -> rails -> deterministic response) in staging.
+8. Only then re-fund Anthropic.
 
 ## Twilio Note
 - Secondary number provided by user: `+1 628-212-7401`

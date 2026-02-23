@@ -65,6 +65,10 @@
    - state backup/restore scripts:
      - `scripts/state_backup.sh`
      - `scripts/state_restore.sh`
+17. Added automated state durability drill and prefund integration:
+   - `scripts/state_drill.sh` (seed -> backup -> wipe -> restore -> verify)
+   - `scripts/prefund_gate.sh` now runs drill by default (can skip with `PREFUND_SKIP_STATE_DRILL=1`)
+   - `docs/PREFUND_VALIDATION.md` updated with durability pass criteria.
 
 ### In Progress
 1. Implement BlueBubbles outbound delivery parity hardening + operational pairing UX polish.

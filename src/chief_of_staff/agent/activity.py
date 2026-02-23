@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any, Generator
 
 from chief_of_staff.config import settings
+from chief_of_staff.knowledge.sqlite_runtime import configure_sqlite_connection
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +93,7 @@ def init_activity_tables() -> None:
 
 @contextmanager
 def _get_conn() -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(settings.sqlite_db_path)
-    conn.row_factory = sqlite3.Row
+    conn = configure_sqlite_connection(sqlite3.connect(settings.sqlite_db_path))
     try:
         yield conn
         conn.commit()

@@ -58,6 +58,13 @@
    - `STATE_DIR` added to config and env template.
    - runtime mutable paths now resolve under `STATE_DIR` by default.
    - architecture decision doc: `docs/DB_RUNTIME_RETHINK_OPENCLAW.md`.
+16. Completed DB/runtime Phase 1 hardening:
+   - SQLite runtime policy (`WAL`, `busy_timeout`, `foreign_keys`) shared across DB access.
+   - migration runner + `schema_migrations` table.
+   - initial SQL migration file: `src/chief_of_staff/knowledge/migrations/0001_initial_schema.sql`.
+   - state backup/restore scripts:
+     - `scripts/state_backup.sh`
+     - `scripts/state_restore.sh`
 
 ### In Progress
 1. Implement BlueBubbles outbound delivery parity hardening + operational pairing UX polish.

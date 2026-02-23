@@ -9,111 +9,9 @@ from pathlib import Path
 from typing import Any, Generator
 
 from chief_of_staff.config import settings
+from chief_of_staff.knowledge.sqlite_runtime import configure_sqlite_connection
 
-_DB_SCHEMA = """
-CREATE TABLE IF NOT EXISTS documents (
-    id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,          -- 'gmail', 'gdocs', 'elevenlabs', 'meeting'
-    source_id TEXT NOT NULL,       -- external ID from the source system
-    title TEXT,
-    content_preview TEXT,          -- first ~500 chars
-    metadata TEXT,                 -- JSON blob for source-specific data
-    ingested_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(source, source_id)
-);
-
-CREATE TABLE IF NOT EXISTS clients (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    practice_name TEXT,
-    email TEXT,
-    phone TEXT,
-    notes TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS conversations (
-    id TEXT PRIMARY KEY,
-    founder_phone TEXT NOT NULL,
-    direction TEXT NOT NULL,       -- 'inbound' or 'outbound'
-    message TEXT NOT NULL,
-    response TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS tasks (
-    id TEXT PRIMARY KEY,
-    description TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',  -- 'pending', 'in_progress', 'completed', 'failed'
-    result TEXT,
-    created_at TEXT NOT NULL,
-    completed_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS email_conversations (
-    id TEXT PRIMARY KEY,
-    email_address TEXT NOT NULL,
-    thread_id TEXT,
-    gmail_message_id TEXT UNIQUE,
-    rfc_message_id TEXT,
-    direction TEXT NOT NULL,
-    subject TEXT,
-    body TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_email_conv_thread ON email_conversations(thread_id);
-CREATE INDEX IF NOT EXISTS idx_email_conv_addr ON email_conversations(email_address);
-CREATE INDEX IF NOT EXISTS idx_email_conv_created ON email_conversations(created_at);
-
-CREATE TABLE IF NOT EXISTS processed_gmail_events (
-    gmail_message_id TEXT PRIMARY KEY,
-    processed_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS complaints (
-    id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,
-    sender TEXT NOT NULL,
-    thread_id TEXT,
-    severity TEXT NOT NULL DEFAULT 'medium',
-    summary TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'open',
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS scheduled_actions (
-    id TEXT PRIMARY KEY,
-    action_type TEXT NOT NULL,
-    schedule_type TEXT NOT NULL,
-    schedule_time TEXT NOT NULL,
-    channel TEXT NOT NULL,
-    target TEXT DEFAULT '',
-    prompt TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
-    last_run_at TEXT,
-    next_run_at TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS sub_agent_runs (
-    id TEXT PRIMARY KEY,
-    parent_agent TEXT NOT NULL,
-    child_agent TEXT NOT NULL,
-    task TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'queued',  -- queued, running, completed, failed, cancelled
-    result TEXT DEFAULT '',
-    error TEXT DEFAULT '',
-    requester_channel TEXT DEFAULT '',
-    requester_user_id TEXT DEFAULT '',
-    requester_session_id TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    started_at TEXT DEFAULT '',
-    ended_at TEXT DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_sub_agent_runs_parent_created ON sub_agent_runs(parent_agent, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sub_agent_runs_status ON sub_agent_runs(status);
-"""
+_MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 
 
 def init_db() -> None:
@@ -121,18 +19,52 @@ def init_db() -> None:
     db_path = Path(settings.sqlite_db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with _get_conn() as conn:
-        conn.executescript(_DB_SCHEMA)
+        _apply_migrations(conn)
 
 
 @contextmanager
 def _get_conn() -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(settings.sqlite_db_path)
-    conn.row_factory = sqlite3.Row
+    conn = configure_sqlite_connection(sqlite3.connect(settings.sqlite_db_path))
     try:
         yield conn
         conn.commit()
     finally:
         conn.close()
+
+
+def _migration_files() -> list[Path]:
+    if not _MIGRATIONS_DIR.exists():
+        return []
+    return sorted(
+        (
+            path for path in _MIGRATIONS_DIR.iterdir()
+            if path.is_file() and path.suffix == ".sql"
+        ),
+        key=lambda path: path.name,
+    )
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS schema_migrations (
+            id TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )"""
+    )
+
+    applied = {
+        row["id"]
+        for row in conn.execute("SELECT id FROM schema_migrations").fetchall()
+    }
+    for migration_path in _migration_files():
+        migration_id = migration_path.name
+        if migration_id in applied:
+            continue
+        conn.executescript(migration_path.read_text(encoding="utf-8"))
+        conn.execute(
+            "INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)",
+            (migration_id, datetime.utcnow().isoformat()),
+        )
 
 
 def upsert_document(

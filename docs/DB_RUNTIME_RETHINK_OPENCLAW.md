@@ -46,10 +46,12 @@ Use `STATE_DIR` (default `~/.arcuate_agents`) as runtime truth.
 - Introduced `STATE_DIR` configuration in `src/chief_of_staff/config.py`.
 - Runtime path defaults now resolve under `STATE_DIR`.
 
-## Phase 1
-- Enable SQLite WAL + busy timeout at connection open.
-- Add `schema_migrations` table and explicit migration files.
-- Add backup/restore scripts for `STATE_DIR`.
+## Phase 1 (done in this branch)
+- Enabled SQLite WAL + busy timeout + foreign key enforcement at connection open.
+- Added `schema_migrations` table and migration file runner (`knowledge/migrations/*.sql`).
+- Added backup/restore scripts for `STATE_DIR`:
+  - `scripts/state_backup.sh`
+  - `scripts/state_restore.sh`
 
 ## Phase 2
 - Split DB concerns:

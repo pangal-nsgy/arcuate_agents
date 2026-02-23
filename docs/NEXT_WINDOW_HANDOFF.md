@@ -55,6 +55,10 @@
 16. DB/runtime architecture rethink (OpenClaw host-local state model):
    - `docs/DB_RUNTIME_RETHINK_OPENCLAW.md`
    - `src/chief_of_staff/config.py` (`STATE_DIR` + state-rooted runtime file paths)
+17. DB/runtime Phase 1 complete:
+   - SQLite runtime policy (`src/chief_of_staff/knowledge/sqlite_runtime.py`)
+   - schema migrations (`src/chief_of_staff/knowledge/migrations/0001_initial_schema.sql`)
+   - state backup/restore scripts (`scripts/state_backup.sh`, `scripts/state_restore.sh`)
 
 ## Current Safety Defaults
 - LLM inbound: off by default unless explicitly resumed.
@@ -67,7 +71,7 @@
 3. Complete remaining P0 control-plane parity gaps referenced in `docs/OPENCLAW_ADOPTION_BLUEPRINT.md`.
 4. Wire voice transcript command execution to approval IDs and delivery confirmations.
 5. Add non-Railway runtime deployment manifests + cutover runbook.
-6. Implement Phase 1 from `docs/DB_RUNTIME_RETHINK_OPENCLAW.md` (SQLite WAL + migrations + state backup/restore).
+6. Run backup/restore drill on staging `STATE_DIR` and verify restart consistency.
 7. Run `docs/PREFUND_VALIDATION.md` in staging and only then re-fund Anthropic.
 
 ## Twilio Note

@@ -10,9 +10,9 @@ Status keys:
 |---|---|---|---|
 | BlueBubbles channel ingress | `docs/channels/bluebubbles.md` | partial | Webhook scaffold added; full pairing/group policy pending |
 | iMessage legacy channel | `docs/channels/imessage.md` | missing | Deferred; BlueBubbles is primary |
-| Hooks wake endpoint | `docs/automation/webhook.md` | missing | To implement |
-| Hooks agent endpoint | `docs/automation/webhook.md` | missing | To implement |
-| Tools invoke HTTP | `docs/gateway/tools-invoke-http-api.md` | missing | To implement deny-list parity |
+| Hooks wake endpoint | `docs/automation/webhook.md` | partial | Implemented `/hooks/wake`; mapped hooks still missing |
+| Hooks agent endpoint | `docs/automation/webhook.md` | partial | Implemented `/hooks/agent`; strict async run scaffold in place |
+| Tools invoke HTTP | `docs/gateway/tools-invoke-http-api.md` | partial | Implemented `/tools/invoke` with auth + deny/allow policy |
 | Gateway method list parity | `src/gateway/server-methods-list.ts` | missing | P0 list to be implemented |
 | Exec approvals API | `docs/tools/exec-approvals.md` | partial | Temporary runtime toggles exist; full store/model missing |
 | Subagent spawn/announce/cascade | `docs/tools/subagents.md` | partial | Existing custom version; not full OpenClaw parity |
@@ -20,4 +20,3 @@ Status keys:
 | OpenAI compatible endpoints | `docs/gateway/openai-http-api.md` | missing | To implement `/v1/chat/completions` |
 | OpenResponses endpoint | `docs/gateway/openresponses-http-api.md` | missing | To implement `/v1/responses` |
 | Railway exit plan | N/A | parity | `docs/OPENCLAW_PLATFORM_MIGRATION_PLAN.md` |
-

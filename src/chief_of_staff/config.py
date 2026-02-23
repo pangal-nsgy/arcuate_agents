@@ -83,6 +83,24 @@ class Settings(BaseSettings):
     subagent_max_concurrency: int = 4
     subagent_announce_channel: str = "chief-of-staff"
 
+    # Gateway auth + HTTP tool policy (OpenClaw-style surface)
+    gateway_auth_token: str = ""
+    gateway_tools_deny: list[str] = [
+        "sessions_spawn",
+        "sessions_send",
+        "gateway",
+        "whatsapp_login",
+    ]
+    gateway_tools_allow: list[str] = []
+
+    # Hooks (OpenClaw-style ingress)
+    hooks_enabled: bool = True
+    hooks_token: str = ""
+    hooks_base_path: str = "/hooks"
+    hooks_allow_request_session_key: bool = False
+    hooks_default_session_key: str = "hook:ingress"
+    hooks_allowed_session_key_prefixes: list[str] = ["hook:"]
+
     # Runtime rails / kill switches
     llm_inbound_enabled: bool = False
     command_execution_enabled: bool = False

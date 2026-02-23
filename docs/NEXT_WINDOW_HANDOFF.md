@@ -4,7 +4,7 @@
 - Repo: `https://github.com/pangal-nsgy/arcuate_agents`
 - Active branch: `claude/mcp-chrome-extension-BW3zj`
 - OpenClaw reference repo: `https://github.com/openclaw/openclaw`
-- Latest implementation commit: `8451491`
+- Latest implementation commit: `branch HEAD` (currently `7a5fa14`)
 
 ## What Is Already Done
 1. Strict OpenClaw parity blueprint:

@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
 
+    # BlueBubbles (iMessage primary channel)
+    bluebubbles_enabled: bool = False
+    bluebubbles_server_url: str = ""
+    bluebubbles_password: str = ""
+    bluebubbles_webhook_secret: str = ""
+
     # ElevenLabs
     elevenlabs_api_key: str = ""
 

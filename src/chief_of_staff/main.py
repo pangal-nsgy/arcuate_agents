@@ -17,6 +17,7 @@ from chief_of_staff.webhooks.twilio import router as twilio_router
 from chief_of_staff.webhooks.gmail import router as gmail_router
 from chief_of_staff.webhooks.zoom import router as zoom_router
 from chief_of_staff.webhooks.recall import router as recall_router
+from chief_of_staff.webhooks.bluebubbles import router as bluebubbles_router
 from chief_of_staff.dashboard.routes import router as dashboard_router
 
 
@@ -103,6 +104,7 @@ app = FastAPI(
 
 # Register webhook routers
 app.include_router(twilio_router)
+app.include_router(bluebubbles_router)
 app.include_router(gmail_router)
 app.include_router(zoom_router)
 app.include_router(recall_router)
